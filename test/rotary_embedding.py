@@ -82,7 +82,7 @@ def test(test_shape, torch_device, test_dtype=torch.float16):
     if test_dtype == torch.float16:
         
         if device == "mlu":
-            torch_RoPE_time = performance.BangProfile((rotary_embedding, (t.to("cpu"), pos.to("cpu"), theta, "cpu")))
+            torch_RoPE_time = performance.BangProfile((rotary_embedding, (output.to("cpu"), pos.to("cpu"), theta, "cpu")))
             '''
             lib.RoPE_cnnl_f16.argtypes = [
                 ctypes.POINTER(ctypes.c_void_p),
@@ -112,9 +112,9 @@ def test(test_shape, torch_device, test_dtype=torch.float16):
             
             
     performance.logBenchmark(torch_RoPE_time, custom_RoPE_time)
-    for i in range(39):#performance里面对output迭代了40次，因此这里需要同样迭代那么多次才能是正确结果
+    for i in range(40):#performance里面对output迭代了40次，因此这里需要同样迭代那么多次才能是正确结果
         output = rotary_embedding(output.to("cpu"), pos.to("cpu"), theta, "cpu")
-    tmpa = rotary_embedding(output.to("cpu"), pos.to("cpu"), theta, "cpu").to("cpu").detach().numpy().flatten()
+    tmpa = output.to("cpu").detach().numpy().flatten()
     
     tmpb = t.to('cpu').detach().numpy().flatten()
     

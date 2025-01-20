@@ -68,7 +68,7 @@ def test(test_shape, test_dtype, device):
     if test_dtype == torch.float16:
         if device == "mlu":
             torch_causal_softmax_time = performance.BangProfile((causal_softmax, (input, )))  # 以毫秒为单位
-            '''
+            
             lib.causal_softmax_bang_f16.argtypes = [
                 ctypes.POINTER(ctypes.c_void_p),
                 ctypes.POINTER(ctypes.c_int),
@@ -88,6 +88,7 @@ def test(test_shape, test_dtype, device):
             ]
             custom_causal_softmax_time = \
             performance.BangProfile((lib.causal_softmax_cnnl_f16, (output_ptr, shape, ndim)))
+            '''
     performance.logBenchmark(torch_causal_softmax_time, custom_causal_softmax_time)
     for i in range(40):#performance里面对output迭代了40次，因此这里需要同样迭代那么多次才能是正确结果
         input = causal_softmax(input)

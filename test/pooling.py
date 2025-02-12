@@ -66,8 +66,8 @@ def test(x_shape, k_shape, padding, stride, device):
         tensor_dtype = torch.float16
     elif byteSize == 4:
         tensor_dtype = torch.float32
-    operator = "max"
-    # operator = "avg"
+    # operator = "max"
+    operator = "avg"
     print(
         f"Testing {operator} Pool on {device} with x_shape:{x_shape} kernel_shape:{k_shape} padding:{padding} stride:{stride} dtype:{tensor_dtype}"
     )
@@ -159,7 +159,8 @@ test_cases = [
         # x_shape, kernel_shape, padding, strides, device
         ((1, 1, 10), (3,), (1,), (1,), "mlu"), 
         ((32, 3, 224, 224), (3, 3), (1, 1), (2, 2), "mlu"),
-        # ((1, 1, 16, 16, 16), (5, 5, 5), (2, 2, 2), (2, 2, 2), "mlu"),
+        ((1, 1, 16, 16, 16), (5, 5, 5), (2, 2, 2), (2, 2, 2), "mlu"),
+        ((32, 128, 16, 16, 16), (5, 5, 5), (2, 2, 2), (2, 2, 2), "mlu"),
         
 ]
 filtered_test_cases = [

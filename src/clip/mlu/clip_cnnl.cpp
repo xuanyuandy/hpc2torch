@@ -25,8 +25,18 @@ void clipCnnlDevice(void const *aData, void *cData,
     cnnlSetTensorDescriptor(
         cDesc, CNNL_LAYOUT_ARRAY, dataType,
         aDim, aShape);
-    cnnlStatus_t stat =
+    cnnlStatus_t stat;
+    if(sizeof(T) == 2){
+        uint16_t minV = static_cast<uint16_t>(minValue);
+        uint16_t maxV = static_cast<uint16_t>(maxValue);
+        stat =
+        cnnlClip_v2(handle, CNNL_POINTER_MODE_HOST, aDesc, aData, &minV, &maxV, cDesc, cData);
+    }
+    else if(sizeof(T) == 4){
+        stat =
         cnnlClip_v2(handle, CNNL_POINTER_MODE_HOST, aDesc, aData, &minValue, &maxValue, cDesc, cData);
+    }
+    
     // cnnlStatus_t stat =
     //     cnnlClip(handle, aDesc, aData, &minValue, &maxValue, cData);
     if (stat != CNNL_STATUS_SUCCESS)

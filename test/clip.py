@@ -14,14 +14,15 @@ lib = ctypes.CDLL(lib_path)
 
 def test(test_shape, minValue, maxValue, device):
     ndim = len(test_shape)
-    print(
-        f"Testing Softmax on {device} with x_shape:{test_shape}, min:{minValue}, max:{maxValue} "
-    )
     byteSize = 2
     if byteSize == 2:
         tensor_dtype = torch.float16
     elif byteSize == 4:
         tensor_dtype = torch.float32
+    print(
+        f"Testing Clip on {device} with x_shape:{test_shape}, min:{minValue}, max:{maxValue}, dtype:{tensor_dtype}"
+    )
+    
     aData = torch.rand(test_shape, device=device, dtype=tensor_dtype, requires_grad=False)
     cData = torch.rand(test_shape, device=device, dtype=tensor_dtype, requires_grad=False)
 

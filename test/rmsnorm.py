@@ -1,6 +1,6 @@
 import torch
 import ctypes
-import torch.nn as nn
+import numpy as np
 from functools import partial
 import argparse
 
@@ -19,22 +19,24 @@ def rms_norm(x, w, eps):
     hidden_states = hidden_states * torch.rsqrt(variance + eps)
     return w * hidden_states.to(input_dtype)
 
-def test(y_shape, x_shape, w_shape, dtype, w_dtype, torch_device):
-    print(f"Testing RMS_Norm on {torch_device} with y_shape:{y_shape} x_shape:{x_shape} w_shape:{w_shape}"
+def test(test_shape, w_shape, dtype, w_dtype, torch_device):
+    print(f"Testing RMS_Norm on {torch_device} with shape:{test_shape} w_shape:{w_shape}"
         f" dtype:{dtype} w_dtype:{w_dtype}")
-    assert len(x_shape) == 2 and len(y_shape) == 2
-    y = torch.zeros(y_shape, dtype=dtype).to(torch_device)
-    x = torch.rand(x_shape, dtype=dtype).to(torch_device)
+    assert test_shape[-1] == w_shape[0]
+    ndim = len(test_shape)
+    y = torch.zeros(test_shape, dtype=dtype).to(torch_device)
+    x = torch.rand(test_shape, dtype=dtype).to(torch_device)
     w = torch.ones(w_shape, dtype=w_dtype).to(torch_device)
 
     eps = 1e-5
-    stride_x = x_shape[1]
-    stride_y = y_shape[1]
-    n = x_shape[0]
-    d = x_shape[1]
+    stride_x = list(x.stride())
+    stride_y = list(y.stride())
     input_ptr = ctypes.cast(x.data_ptr(), ctypes.POINTER(ctypes.c_void_p))
     scale_ptr = ctypes.cast(w.data_ptr(), ctypes.POINTER(ctypes.c_void_p))
     output_ptr = ctypes.cast(y.data_ptr(), ctypes.POINTER(ctypes.c_void_p))
+    shapeData = np.array(test_shape, dtype=np.int32).ctypes.data_as(ctypes.POINTER(ctypes.c_int))
+    strideXData = np.array(stride_x, dtype=np.int32).ctypes.data_as(ctypes.POINTER(ctypes.c_int))
+    strideYData = np.array(stride_y, dtype=np.int32).ctypes.data_as(ctypes.POINTER(ctypes.c_int))
     
     byteT = 2
     byteTw = 2
@@ -50,16 +52,16 @@ def test(y_shape, x_shape, w_shape, dtype, w_dtype, torch_device):
             ctypes.POINTER(ctypes.c_void_p),
             ctypes.POINTER(ctypes.c_void_p),
             ctypes.POINTER(ctypes.c_void_p),
-            ctypes.c_int,
-            ctypes.c_int,
+            ctypes.POINTER(ctypes.c_int),
+            ctypes.POINTER(ctypes.c_int),
+            ctypes.POINTER(ctypes.c_int),
             ctypes.c_float,
-            ctypes.c_int,
             ctypes.c_int,
             ctypes.c_int,
             ctypes.c_int
         ]
         custom_RMSNorm_time = \
-        performance.BangProfile((lib.RMSNorm_bang, (input_ptr, scale_ptr, output_ptr, stride_y, stride_x, eps, n, d, byteT, byteTw)))
+        performance.BangProfile((lib.RMSNorm_bang, (input_ptr, scale_ptr, output_ptr, shapeData, strideYData, strideXData, eps, ndim, byteT, byteTw)))
     performance.logBenchmark(torch_RMSNorm_time, custom_RMSNorm_time)
 
     # 将结果转换回 PyTorch 张量以进行比较
@@ -69,7 +71,7 @@ def test(y_shape, x_shape, w_shape, dtype, w_dtype, torch_device):
     
     atol = max(abs(tmpa - tmpb))
 
-    rtol = atol / max(abs(tmpb) + 1e-8)
+    rtol = atol / (max(abs(tmpb)) + 1e-8)
 
 
     print("absolute error:%.4e"%(atol))
@@ -81,18 +83,17 @@ parser.add_argument('--device', choices=['cpu', 'cuda', 'mlu'], required=True, h
 args = parser.parse_args()    
 
 test_cases = [
-        # y_shape, x_shape, w_shape, dtype, w_dtype
-        ((16, 2048), (16, 2048), (2048,), torch.float16, torch.float16),
-        ((16, 2048), (16, 2048), (2048,), torch.float32, torch.float32),
-        ((16, 2048), (16, 2048), (2048,), torch.float16, torch.float32),
-        ((5, 4096), (5, 4096), (4096,), torch.float16, torch.float16),
-        ((5, 4096), (5, 4096), (4096,), torch.float32, torch.float32),
-        ((5, 4096), (5, 4096), (4096,), torch.float16, torch.float32),
-         
+        # test_shape, w_shape
+        ((2050, ), (2050,)),
+        ((16, 2048), (2048,)),
+        ((5, 4096), (4096,)),
+        ((5, 99, 1000), (1000,)),   
 ]
 
 if args.device == 'mlu':
     import torch_mlu
 # 执行过滤后的测试用例
-for y_shape, x_shape, w_shape, dtype, w_dtype, in test_cases:
-    test(y_shape, x_shape, w_shape, dtype, w_dtype, args.device)
+for test_shape, w_shape,in test_cases:
+    test(test_shape, w_shape, torch.float16, torch.float16, args.device)
+    test(test_shape, w_shape, torch.float16, torch.float32, args.device)
+    test(test_shape, w_shape, torch.float32, torch.float32, args.device)

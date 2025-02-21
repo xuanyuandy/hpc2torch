@@ -7,7 +7,14 @@ __nram__ char nram_buffer[NRAM_MAX_SIZE];
 
 const int SRC_MAX_SIZE = 1024 * 64;//尽量取大一些
 
-__mlu_global__ void RMSNormF(half *destination, half const *source, float const *weight, int stride_y, int stride_x, float eps, int othersize, int dimsize, int dimS){
+
+__mlu_global__ void RMSNormF(half *destination, half const *source, float const *weight, int *shape, int *stride_y, int *stride_x, float eps, int ndim, int dimS){
+    int othersize = 1;
+    for(int i = 0; i < ndim - 1; i++){
+        othersize *= shape[i];
+    }
+    int dimsize = shape[ndim - 1];
+
     const int maxNum = SRC_MAX_SIZE/sizeof(float);
     int wSize = 128 / sizeof(half);
 
@@ -36,8 +43,11 @@ __mlu_global__ void RMSNormF(half *destination, half const *source, float const 
             int inds = 0;
             int indd = 0;
             int indi = i;
-            inds += (indi % othersize) * stride_x;
-            indd += (indi % othersize) * stride_y;
+            for(int j = ndim - 2; j >= 0; j--){
+                inds += (indi % shape[j]) * stride_x[j];
+                indd += (indi % shape[j]) * stride_y[j];
+                indi = indi / shape[j];
+            }
             __bang_write_zero(destSumFinal, wSize);
             __bang_write_zero(destSum, wSize);
             for(int s = 0; s < repeat; s++){
@@ -120,8 +130,11 @@ __mlu_global__ void RMSNormF(half *destination, half const *source, float const 
             int inds = 0;
             int indd = 0;
             int indi = i;
-            inds += (indi % othersize) * stride_x;
-            indd += (indi % othersize) * stride_y;
+            for(int j = ndim - 2; j >= 0; j--){
+                inds += (indi % shape[j]) * stride_x[j];
+                indd += (indi % shape[j]) * stride_y[j];
+                indi = indi / shape[j];
+            }
             __memcpy(src, source + inds, dimsize * sizeof(half), GDRAM2NRAM);
             __bang_mul(destSum, src, src, dimsize);//src = src * src
             if(dimS >= wSize){
@@ -150,7 +163,13 @@ __mlu_global__ void RMSNormF(half *destination, half const *source, float const 
 }
 
 template<typename T>
-__mlu_global__ void RMSNorm(T *destination, T const *source, T const *weight, int stride_y, int stride_x, float eps, int othersize, int dimsize, int dimS){
+__mlu_global__ void RMSNorm(T *destination, T const *source, T const *weight, int *shape, int *stride_y, int *stride_x, float eps, int ndim, int dimS){
+    int othersize = 1;
+    for(int i = 0; i < ndim - 1; i++){
+        othersize *= shape[i];
+    }
+    int dimsize = shape[ndim - 1];
+
     const int maxNum = SRC_MAX_SIZE/sizeof(T);
     int wSize = 128 / sizeof(T);
 
@@ -177,8 +196,11 @@ __mlu_global__ void RMSNorm(T *destination, T const *source, T const *weight, in
             int inds = 0;
             int indd = 0;
             int indi = i;
-            inds += (indi % othersize) * stride_x;
-            indd += (indi % othersize) * stride_y;
+            for(int j = ndim - 2; j >= 0; j--){
+                inds += (indi % shape[j]) * stride_x[j];
+                indd += (indi % shape[j]) * stride_y[j];
+                indi = indi / shape[j];
+            }
             __bang_write_zero(destSumFinal, wSize);
             __bang_write_zero(destSum, wSize);
             for(int s = 0; s < repeat; s++){
@@ -257,8 +279,11 @@ __mlu_global__ void RMSNorm(T *destination, T const *source, T const *weight, in
             int inds = 0;
             int indd = 0;
             int indi = i;
-            inds += (indi % othersize) * stride_x;
-            indd += (indi % othersize) * stride_y;
+            for(int j = ndim - 2; j >= 0; j--){
+                inds += (indi % shape[j]) * stride_x[j];
+                indd += (indi % shape[j]) * stride_y[j];
+                indi = indi / shape[j];
+            }
             __memcpy(src, source + inds, dimsize * sizeof(T), GDRAM2NRAM);
             __bang_mul(destSum, src, src, dimsize);//src = src * src
             if(dimS >= wSize){
@@ -288,7 +313,7 @@ __mlu_global__ void RMSNorm(T *destination, T const *source, T const *weight, in
 
 
 template<typename T, typename Tw>
-void RMSNormUnion(cnrtQueue_t queue, void *y, void const *x, void const *w, int stride_y, int stride_x, float epsilon, int n, int d){
+void RMSNormUnion(cnrtQueue_t queue, void *y, void const *x, void const *w, int *shape, int *stride_y, int *stride_x, float eps, int ndim){
     cnrtDim3_t k_dim;
     cnrtFunctionType_t k_type;
 
@@ -296,41 +321,52 @@ void RMSNormUnion(cnrtQueue_t queue, void *y, void const *x, void const *w, int 
     k_dim.y = 1;
     k_dim.z = 1;
     k_type = CNRT_FUNC_TYPE_UNION1;
+    int dimsize = shape[ndim - 1];
     int dimS;
-    float mi = log2(d);
+    float mi = log2(dimsize);
     if (floor(mi) == mi) {
-        dimS = d;
+        dimS = dimsize;
     } else {
         dimS = pow(2, floor(mi) + 1);
     }
     auto y_ = reinterpret_cast<T *>(y);
     auto x_ = reinterpret_cast<T const *>(x);
     auto w_ = reinterpret_cast<Tw const *>(w);
+    char *tmpDevice;
+    CNRT_CHECK(cnrtMalloc((void**)&tmpDevice, 3 * ndim * sizeof(int)));
+    char *tmpStride = tmpDevice + ndim * sizeof(int);
+    int *mlu_shape = (int *)tmpDevice;
+    int *mlu_stride_x = (int *)tmpStride;
+    int *mlu_stride_y = mlu_stride_x + ndim;
+    CNRT_CHECK(cnrtMemcpy(mlu_shape, shape, ndim * sizeof(int), cnrtMemcpyHostToDev));
+    CNRT_CHECK(cnrtMemcpy(mlu_stride_x, stride_x, ndim * sizeof(int), cnrtMemcpyHostToDev));
+    CNRT_CHECK(cnrtMemcpy(mlu_stride_y, stride_y, ndim * sizeof(int), cnrtMemcpyHostToDev));
+
     if constexpr (std::is_same<T, half>::value && std::is_same<Tw, float>::value){//不能使用sizeof判断
-        RMSNormF<<<k_dim, k_type, queue>>>(y_, x_, w_, stride_y, stride_x, epsilon, n, d, dimS);
+        RMSNormF<<<k_dim, k_type, queue>>>(y_, x_, w_, mlu_shape, mlu_stride_y, mlu_stride_x, eps, ndim, dimS);
     }
     else{
-        RMSNorm<T><<<k_dim, k_type, queue>>>(y_, x_, w_, stride_y, stride_x, epsilon, n, d, dimS);
+        RMSNorm<T><<<k_dim, k_type, queue>>>(y_, x_, w_, mlu_shape, mlu_stride_y, mlu_stride_x, eps, ndim, dimS);
     }
     
     cnrtQueueSync(queue);
-
+    cnrtFree(tmpDevice);
 }
 extern "C" void RMSNorm_bang(void *y, void const *x, void const *w,
-                             int stride_y, int stride_x, float epsilon, int n, int d, int byteT, int byteTw){
+                             int *shape, int *stride_y, int *stride_x, float eps, int ndim, int byteT, int byteTw){
     cnrtQueue_t queue;
     CNRT_CHECK(cnrtSetDevice(0));
     CNRT_CHECK(cnrtQueueCreate(&queue));
     
     if(byteT == 2 && byteTw == 4){
-        RMSNormUnion<half, float>(queue, y, x, w, stride_y, stride_x, epsilon, n, d);
+        RMSNormUnion<half, float>(queue, y, x, w, shape, stride_y, stride_x, eps, ndim);
     }
     
     else if(byteT == 4 && byteTw == 4){
-        RMSNormUnion<float, float>(queue, y, x, w, stride_y, stride_x, epsilon, n, d);
+        RMSNormUnion<float, float>(queue, y, x, w, shape, stride_y, stride_x, eps, ndim);
     }
     else if(byteT == 2 && byteTw == 2){
-        RMSNormUnion<half, half>(queue, y, x, w, stride_y, stride_x, epsilon, n, d);
+        RMSNormUnion<half, half>(queue, y, x, w, shape, stride_y, stride_x, eps, ndim);
     }
     CNRT_CHECK(cnrtQueueDestroy(queue));
 

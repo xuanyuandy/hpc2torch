@@ -30,6 +30,8 @@ def convTran(x, w, stride, padding, dilation):
     else:
         print("Error: Pytorch -> Unsupported tensor dimension")
         return None
+
+
 def inferShape(
     x_shape: List[int],
     w_shape: List[int],
@@ -37,25 +39,30 @@ def inferShape(
     strides: List[int],
     dilations: List[int],
 ) -> Tuple[int, ...]:
+    # 检查维度一致性
     assert (
         len(x_shape) == len(w_shape) == len(pads) + 2 == len(dilations) + 2 == len(strides) + 2
-    ), "x and w should have the same length; pads, strides, and dilatinos should have the same length; the length of pads should be that of x - 2"
-    output_dims = [
-        math.floor(
-            (x_shape[i+2] + 2 * pads[i] - dilations[i] * (w_shape[i+2] - 1) - 1)
-            / strides[i]
-            + 1
-        )
-        for i in range(len(pads))
-    ]
-    return (x_shape[0], w_shape[0]) + tuple(output_dims)
+    ), "x and w should have the same length; pads, strides, and dilations should have the same length; the length of pads should be that of x - 2"
+    
+    # 初始化输出维度列表
+    output_dims = []
+    
+    for i in range(len(pads)):
+        # 有效卷积核大小
+        effective_kernel_size = (w_shape[i + 2] - 1) * dilations[i] + 1
+        # 输出尺寸计算
+        output_dim = strides[i] * (x_shape[i + 2] - 1) + effective_kernel_size - pads[i] * 2
+        output_dims.append(output_dim)
+    # 返回输出形状
+    return (x_shape[0], w_shape[1]) + tuple(output_dims)
 
-def test(w_shape, x_shape, pads, strides, dilations, device):
+
+def test(x_shape, w_shape, pads, strides, dilations, device):
     byteSize = 2
     if byteSize == 2:
         test_dtype = torch.float16
     elif byteSize == 4:
-        est_dtype = torch.float32
+        test_dtype = torch.float32
     print(
         f"Testing convTranspose on {device} with x_shape:{x_shape}, w_shape:{w_shape}, pads: {pads}, strides: {strides}, dilations: {dilations}, dtype:{test_dtype}"
     )           
@@ -64,7 +71,7 @@ def test(w_shape, x_shape, pads, strides, dilations, device):
     x = torch.rand(x_shape, dtype=test_dtype).to(device)
     w = torch.rand(w_shape, dtype=test_dtype).to(device)
     y_shape = inferShape(x.shape, w.shape, pads, strides, dilations)
-    y = torch.zeros(y_shape, dtype=test_dtype).to(device)
+    y = torch.zeros(y_shape, dtype=test_dtype).to(device);print(y.shape)
     tmpa = convTran(x, w, strides, pads, dilations);print(tmpa.shape)
     x_ptr = ctypes.cast(x.data_ptr(), ctypes.POINTER(ctypes.c_void_p))
     w_ptr = ctypes.cast(w.data_ptr(), ctypes.POINTER(ctypes.c_void_p))
@@ -89,7 +96,7 @@ def test(w_shape, x_shape, pads, strides, dilations, device):
     dData = d_array.ctypes.data_as(ctypes.POINTER(ctypes.c_int))
 
     if device == "mlu":
-        torch_convTranspose_time = performance.BangProfile((conv, (x, w, strides, pads, dilations))) 
+        torch_convTranspose_time = performance.BangProfile((convTran, (x, w, strides, pads, dilations))) 
         lib.convTranspose_cnnl.argtypes = [
             ctypes.POINTER(ctypes.c_void_p),
             ctypes.POINTER(ctypes.c_void_p),
@@ -129,23 +136,23 @@ parser.add_argument('--device', choices=['cpu', 'cuda', 'mlu', 'npu'], required=
 args = parser.parse_args()    
 
 test_cases = [   
-        ((32, 3, 4),
-            (32, 3, 5),
+        ((20, 16, 50),
+            (16, 33, 5),
             (1,),
             (1,),
             (1,)),    
-        ((32, 3, 128, 128),
+        ((32, 64, 128, 128),
             (64, 3, 5, 5),
             (2, 2),
             (2, 2),
             (1, 1)), 
-        ((1, 1, 4, 4, 4),
-            (1, 1, 5, 5, 5),
+        ((1, 2, 4, 4, 4),
+            (2, 1, 5, 5, 5),
             (1, 1, 1),
             (1, 1, 1),
             (1, 1, 1)), 
         ((32, 3, 32, 32, 32),
-            (64, 3, 5, 5, 5),
+            (3, 3, 5, 5, 5),
             (3, 2, 2),
             (4, 3, 3),
             (2, 2, 1)),   

@@ -42,8 +42,8 @@ void convTransposeCnnlDeviceDim_4(void const *input, void const *scale, void *ou
         y_desc, layout, dataType,
         outDim.size(), outDim.data());
     int *pad;
-    pad = (int *)malloc(6 * sizeof(int));
-    for(int i = 0; i < 3; i++){
+    pad = (int *)malloc(4 * sizeof(int));
+    for(int i = 0; i < 2; i++){
         pad[2 * i] = pads[i];
         pad[2 * i + 1] = pads[i];
     }
@@ -56,7 +56,7 @@ void convTransposeCnnlDeviceDim_4(void const *input, void const *scale, void *ou
                                          dataType);
     cnnlConvolutionBwdDataAlgo_t algo;
     cnnlGetConvolutionBackwardDataAlgorithm(
-        handle, w_desc, x_desc, convDesc, y_desc,
+        handle, x_desc, w_desc, convDesc, y_desc,
         CNNL_CONVOLUTION_BWD_DATA_FASTEST, &algo);                                  
     size_t convSize;                                     
     cnnlGetConvolutionBackwardDataWorkspaceSize(handle,
@@ -209,9 +209,10 @@ void convTransposeCnnlDeviceDim_5(void const *input, void const *scale, void *ou
                                          dataType);
     cnnlConvolutionBwdDataAlgo_t algo;
     cnnlGetConvolutionBackwardDataAlgorithm(
-        handle, SDesc, IDesc, convDesc, ODesc,
+        handle, IDesc, SDesc, convDesc, ODesc,
         CNNL_CONVOLUTION_BWD_DATA_FASTEST, &algo);                                  
-    size_t convSize;                                     
+    size_t convSize;                         
+    
     cnnlGetConvolutionBackwardDataWorkspaceSize(handle,
                                        SDesc,
                                        IDesc,

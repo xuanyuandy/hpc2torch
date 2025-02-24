@@ -95,6 +95,10 @@ def test(x_shape, w_shape, pads, strides, dilations, device):
     d_array = np.array(dilations, dtype=np.int32)
     dData = d_array.ctypes.data_as(ctypes.POINTER(ctypes.c_int))
 
+    outpads = [0 for i in range(len(pads))]
+    outpads_array = np.array(outpads, dtype=np.int32)
+    oData = outpads_array.ctypes.data_as(ctypes.POINTER(ctypes.c_int))
+
     if device == "mlu":
         torch_convTranspose_time = performance.BangProfile((convTran, (x, w, strides, pads, dilations))) 
         lib.convTranspose_cnnl.argtypes = [
@@ -112,6 +116,24 @@ def test(x_shape, w_shape, pads, strides, dilations, device):
         ]           
         custom_convTranspose_time = \
         performance.BangProfile((lib.convTranspose_cnnl, (x_ptr, w_ptr, y_ptr, pData, sData, dData, xShape, wShape, yShape, ndim, byteSize)))
+    elif device == "npu":
+        torch_convTranspose_time = performance.AscendProfile((convTran, (x, w, strides, pads, dilations))) 
+        lib.convTranspose_cnnl.argtypes = [
+            ctypes.POINTER(ctypes.c_void_p),
+            ctypes.POINTER(ctypes.c_void_p),
+            ctypes.POINTER(ctypes.c_void_p),
+            ctypes.POINTER(ctypes.c_int),#pads
+            ctypes.POINTER(ctypes.c_int),#strides
+            ctypes.POINTER(ctypes.c_int),#dilations
+            ctypes.POINTER(ctypes.c_int),#outpads
+            ctypes.POINTER(ctypes.c_int),#x_shape
+            ctypes.POINTER(ctypes.c_int),#w_shape
+            ctypes.POINTER(ctypes.c_int),#y_shape
+            ctypes.c_int,
+            ctypes.c_int
+        ]           
+        custom_convTranspose_time = \
+        performance.AscendProfile((lib.convTranspose_cnnl, (x_ptr, w_ptr, y_ptr, pData, sData, dData, oData, xShape, wShape, yShape, ndim, byteSize)))
             
     performance.logBenchmark(torch_convTranspose_time, custom_convTranspose_time)
     

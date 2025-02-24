@@ -52,7 +52,7 @@ def inferShape(
 
 def test(x_shape, w_shape, pads, strides, dilations, test_dtype, device):
     print(
-        f"Testing Batchnorm on {device} with x_shape:{x_shape}, w_shape:{w_shape}, pads: {pads}, strides: {strides}, dilations: {dilations}, dtype:{test_dtype}"
+        f"Testing Convolution on {device} with x_shape:{x_shape}, w_shape:{w_shape}, pads: {pads}, strides: {strides}, dilations: {dilations}, dtype:{test_dtype}"
     )           
     ndim = len(x_shape) 
 

@@ -34,7 +34,13 @@ def bitwiseNot(x, y):
 def bitwisexor(x, y):
     return torch.bitwise_xor(x, y)
 def test(c_shape, a_shape, b_shape, device):
-    operator = "bitwiseOr"
+    operator = "max"
+    # operator = "min"
+    # operator = "add"
+    # operator = "pow"
+    # operator = "div"
+    # operator = "mul"
+    # operator = "bitwiseOr"
     print(
         f"Testing {operator} on {device} with aShape:{a_shape}, bShape:{b_shape}, cShape:{c_shape}"
     )
@@ -86,6 +92,23 @@ def test(c_shape, a_shape, b_shape, device):
             custom_elementwise_time = \
             performance.BangProfile((lib.div_cnnl, (aData, bData, cData, aShape, bShape, cShape,
                                     aDim, bDim, cDim, byteSize)))
+        if device == "npu":
+            torch_elementwise_time = performance.AscendProfile((div, (a, b)))  # 可以替换为mul, div
+            lib.div_aclnn.argtypes = [
+                ctypes.POINTER(ctypes.c_void_p),
+                ctypes.POINTER(ctypes.c_void_p),
+                ctypes.POINTER(ctypes.c_void_p),
+                ctypes.POINTER(ctypes.c_int),
+                ctypes.POINTER(ctypes.c_int),
+                ctypes.POINTER(ctypes.c_int),
+                ctypes.c_int,
+                ctypes.c_int,
+                ctypes.c_int,
+                ctypes.c_int
+            ]
+            custom_elementwise_time = \
+            performance.AscendProfile((lib.div_aclnn, (aData, bData, cData, aShape, bShape, cShape,
+                                    aDim, bDim, cDim, byteSize)))                           
         performance.logBenchmark(torch_elementwise_time, custom_elementwise_time)
         # 将结果转换回 PyTorch 张量以进行比较
         tmpa = div(a, b).to('cpu').numpy().flatten()
@@ -107,6 +130,23 @@ def test(c_shape, a_shape, b_shape, device):
             custom_elementwise_time = \
             performance.BangProfile((lib.mul_cnnl, (aData, bData, cData, aShape, bShape, cShape,
                                     aDim, bDim, cDim, byteSize)))
+        if device == "npu":
+            torch_elementwise_time = performance.AscendProfile((mul, (a, b)))  # 可以替换为mul, div
+            lib.mul_aclnn.argtypes = [
+                ctypes.POINTER(ctypes.c_void_p),
+                ctypes.POINTER(ctypes.c_void_p),
+                ctypes.POINTER(ctypes.c_void_p),
+                ctypes.POINTER(ctypes.c_int),
+                ctypes.POINTER(ctypes.c_int),
+                ctypes.POINTER(ctypes.c_int),
+                ctypes.c_int,
+                ctypes.c_int,
+                ctypes.c_int,
+                ctypes.c_int
+            ]
+            custom_elementwise_time = \
+            performance.AscendProfile((lib.mul_aclnn, (aData, bData, cData, aShape, bShape, cShape,
+                                    aDim, bDim, cDim, byteSize)))                           
         performance.logBenchmark(torch_elementwise_time, custom_elementwise_time)
         # 将结果转换回 PyTorch 张量以进行比较
         tmpa = mul(a, b).to('cpu').numpy().flatten()
@@ -128,6 +168,23 @@ def test(c_shape, a_shape, b_shape, device):
             custom_elementwise_time = \
             performance.BangProfile((lib.add_cnnl, (aData, bData, cData, aShape, bShape, cShape,
                                     aDim, bDim, cDim, byteSize)))
+        if device == "npu":
+            torch_elementwise_time = performance.AscendProfile((add, (a, b)))  # 可以替换为mul, div
+            lib.add_aclnn.argtypes = [
+                ctypes.POINTER(ctypes.c_void_p),
+                ctypes.POINTER(ctypes.c_void_p),
+                ctypes.POINTER(ctypes.c_void_p),
+                ctypes.POINTER(ctypes.c_int),
+                ctypes.POINTER(ctypes.c_int),
+                ctypes.POINTER(ctypes.c_int),
+                ctypes.c_int,
+                ctypes.c_int,
+                ctypes.c_int,
+                ctypes.c_int
+            ]
+            custom_elementwise_time = \
+            performance.AscendProfile((lib.add_aclnn, (aData, bData, cData, aShape, bShape, cShape,
+                                    aDim, bDim, cDim, byteSize)))                           
         performance.logBenchmark(torch_elementwise_time, custom_elementwise_time)
         # 将结果转换回 PyTorch 张量以进行比较
         tmpa = add(a, b).to('cpu').numpy().flatten()
@@ -149,6 +206,23 @@ def test(c_shape, a_shape, b_shape, device):
             custom_elementwise_time = \
             performance.BangProfile((lib.max_cnnl, (aData, bData, cData, aShape, bShape, cShape,
                                     aDim, bDim, cDim, byteSize)))
+        if device == "npu":
+            torch_elementwise_time = performance.AscendProfile((maximum, (a, b)))  # 可以替换为mul, div
+            lib.max_aclnn.argtypes = [
+                ctypes.POINTER(ctypes.c_void_p),
+                ctypes.POINTER(ctypes.c_void_p),
+                ctypes.POINTER(ctypes.c_void_p),
+                ctypes.POINTER(ctypes.c_int),
+                ctypes.POINTER(ctypes.c_int),
+                ctypes.POINTER(ctypes.c_int),
+                ctypes.c_int,
+                ctypes.c_int,
+                ctypes.c_int,
+                ctypes.c_int
+            ]
+            custom_elementwise_time = \
+            performance.AscendProfile((lib.max_aclnn, (aData, bData, cData, aShape, bShape, cShape,
+                                    aDim, bDim, cDim, byteSize)))                           
         performance.logBenchmark(torch_elementwise_time, custom_elementwise_time)
         # 将结果转换回 PyTorch 张量以进行比较
         tmpa = maximum(a, b).to('cpu').numpy().flatten()
@@ -191,6 +265,23 @@ def test(c_shape, a_shape, b_shape, device):
             custom_elementwise_time = \
             performance.BangProfile((lib.pow_cnnl, (aData, bData, cData, aShape, bShape, cShape,
                                     aDim, bDim, cDim, byteSize)))
+        if device == "npu":
+            torch_elementwise_time = performance.AscendProfile((pow, (a, b)))  # 可以替换为mul, div
+            lib.pow_aclnn.argtypes = [
+                ctypes.POINTER(ctypes.c_void_p),
+                ctypes.POINTER(ctypes.c_void_p),
+                ctypes.POINTER(ctypes.c_void_p),
+                ctypes.POINTER(ctypes.c_int),
+                ctypes.POINTER(ctypes.c_int),
+                ctypes.POINTER(ctypes.c_int),
+                ctypes.c_int,
+                ctypes.c_int,
+                ctypes.c_int,
+                ctypes.c_int
+            ]
+            custom_elementwise_time = \
+            performance.AscendProfile((lib.pow_aclnn, (aData, bData, cData, aShape, bShape, cShape,
+                                    aDim, bDim, cDim, byteSize)))                           
         performance.logBenchmark(torch_elementwise_time, custom_elementwise_time)
         # 将结果转换回 PyTorch 张量以进行比较
         tmpa = pow(a, b).to('cpu').numpy().flatten()
@@ -310,28 +401,26 @@ def test(c_shape, a_shape, b_shape, device):
     print("relative error:%.4e"%(rtol))
 # 解析命令行参数
 parser = argparse.ArgumentParser(description="Test elementwise on different devices.")
-parser.add_argument('--device', choices=['cpu', 'cuda', 'mlu'], required=True, help="Device to run the tests on.")
+parser.add_argument('--device', choices=['cpu', 'cuda', 'mlu', 'npu'], required=True, help="Device to run the tests on.")
 args = parser.parse_args()    
 
 test_cases = [
-        # c_shape, a_shape, b_shape, device
-        ((1, 3), (1, 3), (1, 3), 'mlu'),
-        ((2, 4, 3), (2, 1, 3), (4, 3), 'mlu'),
-        ((2, 3, 4, 5), (2, 3, 4, 5), (5,), 'mlu'),
+        # c_shape, a_shape, b_shape
+        ((1, 3), (1, 3), (1, 3)),
+        ((2, 4, 3), (2, 1, 3), (4, 3)),
+        ((2, 3, 4, 5), (2, 3, 4, 5), (5,)),
 
-        ((3, 2, 4, 5), (4, 5), (3, 2, 1, 1), 'mlu'),
-        ((3, 20, 33), (3, 20, 33), (3, 20, 33), 'mlu'),
-        ((32, 3, 112, 112), (32, 3, 112, 112), (32, 3, 112, 112), 'mlu'),
+        ((3, 2, 4, 5), (4, 5), (3, 2, 1, 1)),
+        ((3, 20, 33), (3, 20, 33), (3, 20, 33)),
+        ((32, 3, 112, 112), (32, 3, 112, 112), (32, 3, 112, 112)),
 
         
 ]
-filtered_test_cases = [
-    (c_shape, a_shape, b_shape, device)
-    for c_shape, a_shape, b_shape, device in test_cases
-    if device == args.device
-]
+
 if args.device == 'mlu':
     import torch_mlu
+if args.device == 'npu':
+    import torch_npu
 # 执行过滤后的测试用例
-for c_shape, a_shape, b_shape, device in filtered_test_cases:
-    test(c_shape, a_shape, b_shape, device)
+for c_shape, a_shape, b_shape in test_cases:
+    test(c_shape, a_shape, b_shape, args.device)

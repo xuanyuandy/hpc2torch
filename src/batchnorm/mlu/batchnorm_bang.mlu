@@ -271,17 +271,17 @@ void batchnormUnion(cnrtQueue_t queue, void const *input, void const *scale, voi
         cnnlDestroyTransposeDescriptor(desc);
     }
 }
-extern "C" void batchnorm_bang_f32(void const *input, void const *scale, void const *bias, void const *mean, void const *var, void *output, int *shape, int nDim, float eps){
+extern "C" void batchnorm_bang(void const *input, void const *scale, void const *bias, void const *mean, void const *var, void *output, 
+int *shape, int nDim, float eps, int byteSize){
     cnrtQueue_t queue;
     CNRT_CHECK(cnrtSetDevice(0));
     CNRT_CHECK(cnrtQueueCreate(&queue));
-    batchnormUnion<float>(queue, input, scale, bias, mean, var, output, shape, nDim, eps);
+    if (byteSize == 2){
+        batchnormUnion<half>(queue, input, scale, bias, mean, var, output, shape, nDim, eps);
+    }
+    else if (byteSize == 4){
+        batchnormUnion<float>(queue, input, scale, bias, mean, var, output, shape, nDim, eps);
+    }
     CNRT_CHECK(cnrtQueueDestroy(queue));
 }
-extern "C" void batchnorm_bang_f16(void const *input, void const *scale, void const *bias, void const *mean, void const *var, void *output, int *shape, int nDim, float eps){
-    cnrtQueue_t queue;
-    CNRT_CHECK(cnrtSetDevice(0));
-    CNRT_CHECK(cnrtQueueCreate(&queue));
-    batchnormUnion<half>(queue, input, scale, bias, mean, var, output, shape, nDim, eps);
-    CNRT_CHECK(cnrtQueueDestroy(queue));
-}
+

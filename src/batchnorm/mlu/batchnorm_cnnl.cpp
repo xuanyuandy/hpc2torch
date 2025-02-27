@@ -43,9 +43,9 @@ void batchnormCnnlDevice(void const *input, void const *scale, void const *bias,
     else if(sizeof(T) == 4){
         dataType = CNNL_DTYPE_FLOAT;
     }
-    
+    //填充filter_bias_mean_var_desc的时候注意，如果scale, bias这些数据类型和input不一致，这里就要手动修改
     cnnlSetTensorDescriptor(
-        filter_bias_mean_var_desc, CNNL_LAYOUT_ARRAY, CNNL_DTYPE_FLOAT,
+        filter_bias_mean_var_desc, CNNL_LAYOUT_ARRAY, dataType,
         fbmvDim.size(), fbmvDim.data()); 
     if(nDim > 2){
         
@@ -168,12 +168,16 @@ void batchnormCnnl(void const *input, void const *scale, void const *bias, void 
 
     
 }
-extern "C" void batchnorm_cnnl_f32(void const *input, void const *scale, void const *bias, void const *mean, void const *var, void *output, int *shape, int nDim, float eps){
-    batchnormCnnl<float>(input, scale, bias, mean, var, output, shape, nDim, eps);
+extern "C" void batchnorm_cnnl(void const *input, void const *scale, void const *bias, void const *mean, void const *var, void *output, 
+    int *shape, int nDim, float eps, int byteSize){
+    if(byteSize == 2){
+        batchnormCnnl<uint16_t>(input, scale, bias, mean, var, output, shape, nDim, eps);
+    }
+    else if(byteSize == 4){
+        batchnormCnnl<float>(input, scale, bias, mean, var, output, shape, nDim, eps);
+    }
 }
-extern "C" void batchnorm_cnnl_f16(void const *input, void const *scale, void const *bias, void const *mean, void const *var, void *output, int *shape, int nDim, float eps){
-    batchnormCnnl<uint16_t>(input, scale, bias, mean, var, output, shape, nDim, eps);
-}
+
 
 
 

@@ -92,6 +92,7 @@ def test(test_shape, eps, device):
         custom_batchnorm_time = \
         performance.BangProfile((lib.batchnorm_bang, 
         (input_ptr, scale_ptr, bias_ptr, mean_ptr, var_ptr, output_ptr, shape, ndim, eps, byteSize)))
+        
     elif device == "npu":
         torch_batchnorm_time = performance.AscendProfile((batch_norm, (input, scale, bias, mean, var, eps)))  # 以毫秒为单位
         lib.batchnorm_aclnn.argtypes = [

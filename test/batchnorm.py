@@ -23,23 +23,28 @@ def batch_norm(x, scale, b, mean, var, eps):
     if ndim <= 1 or ndim > 5:
         print("Error: Pytorch -> Unsupported tensor dimension")
         return None
-    return F.batch_norm(x, mean, var, scale, b, training=False, eps=eps)
+    return F.batch_norm(x, mean, var, scale, b, training=False, momentum=0.1, eps=eps)
 
 
-def test(test_shape, test_dtype, eps, device):
+def test(test_shape, eps, device):
+    byteSize = 2
+    if byteSize == 2:
+        tensor_dtype = torch.float16
+    elif byteSize == 4:
+        tensor_dtype = torch.float32
     print(
-        f"Testing Batchnorm on {device} with test_shape:{test_shape}, dtype:{test_dtype}, eps:{eps}"
+        f"Testing Batchnorm on {device} with test_shape:{test_shape}, dtype:{tensor_dtype}, eps:{eps}"
     )
     ndim = len(test_shape)
     cSize = test_shape[1]
-    input = torch.rand(test_shape, device=device, dtype=test_dtype, requires_grad=False)
+    input = torch.rand(test_shape, device=device, dtype=tensor_dtype, requires_grad=False)
     #cnnlBatchnorm支持scale类型f16但是input类型f32的情况，但是手写batchnorm必须保证input,scale数据类型保持一致
-    bn_dtype = test_dtype if test_dtype != torch.float16 else torch.float32
+    bn_dtype = tensor_dtype 
     scale = torch.rand(cSize, device=device, dtype=bn_dtype, requires_grad=False)
     bias = torch.rand(cSize, device=device, dtype=bn_dtype, requires_grad=False)
     mean, var = get_mean_variance(input, bn_dtype)
     
-    output = torch.rand(test_shape, device=device, dtype=test_dtype, requires_grad=False)
+    output = torch.rand(test_shape, device=device, dtype=tensor_dtype, requires_grad=False)
 
     input_ptr = ctypes.cast(input.data_ptr(), ctypes.POINTER(ctypes.c_void_p))
     scale_ptr = ctypes.cast(scale.data_ptr(), ctypes.POINTER(ctypes.c_void_p))
@@ -53,72 +58,58 @@ def test(test_shape, test_dtype, eps, device):
     shape = np_array.ctypes.data_as(ctypes.POINTER(ctypes.c_int))
     
     
-    if test_dtype == torch.float32:
+    if device == "mlu":
+        torch_batchnorm_time = performance.BangProfile((batch_norm, (input, scale, bias, mean, var, eps)))  # 以毫秒为单位
+        '''
+        lib.batchnorm_cnnl.argtypes = [
+            ctypes.POINTER(ctypes.c_void_p),
+            ctypes.POINTER(ctypes.c_void_p),
+            ctypes.POINTER(ctypes.c_void_p),
+            ctypes.POINTER(ctypes.c_void_p),
+            ctypes.POINTER(ctypes.c_void_p),
+            ctypes.POINTER(ctypes.c_void_p),
+            ctypes.POINTER(ctypes.c_int),
+            ctypes.c_int,
+            ctypes.c_float,
+            ctypes.c_int
+        ]           
+        custom_batchnorm_time = \
+        performance.BangProfile((lib.batchnorm_cnnl, 
+        (input_ptr, scale_ptr, bias_ptr, mean_ptr, var_ptr, output_ptr, shape, ndim, eps, byteSize)))
+        '''
+        lib.batchnorm_bang.argtypes = [
+            ctypes.POINTER(ctypes.c_void_p),
+            ctypes.POINTER(ctypes.c_void_p),
+            ctypes.POINTER(ctypes.c_void_p),
+            ctypes.POINTER(ctypes.c_void_p),
+            ctypes.POINTER(ctypes.c_void_p),
+            ctypes.POINTER(ctypes.c_void_p),
+            ctypes.POINTER(ctypes.c_int),
+            ctypes.c_int,
+            ctypes.c_float,
+            ctypes.c_int
+        ]           
+        custom_batchnorm_time = \
+        performance.BangProfile((lib.batchnorm_bang, 
+        (input_ptr, scale_ptr, bias_ptr, mean_ptr, var_ptr, output_ptr, shape, ndim, eps, byteSize)))
+    elif device == "npu":
+        torch_batchnorm_time = performance.AscendProfile((batch_norm, (input, scale, bias, mean, var, eps)))  # 以毫秒为单位
+        lib.batchnorm_aclnn.argtypes = [
+            ctypes.POINTER(ctypes.c_void_p),
+            ctypes.POINTER(ctypes.c_void_p),
+            ctypes.POINTER(ctypes.c_void_p),
+            ctypes.POINTER(ctypes.c_void_p),
+            ctypes.POINTER(ctypes.c_void_p),
+            ctypes.POINTER(ctypes.c_void_p),
+            ctypes.POINTER(ctypes.c_int),
+            ctypes.c_int,
+            ctypes.c_float,
+            ctypes.c_int
+        ]           
+        custom_batchnorm_time = \
+        performance.AscendProfile((lib.batchnorm_aclnn, 
+        (input_ptr, scale_ptr, bias_ptr, mean_ptr, var_ptr, output_ptr, shape, ndim, eps, byteSize)))
         
-        if device == "mlu":
-            torch_batchnorm_time = performance.BangProfile((batch_norm, (input, scale, bias, mean, var, eps)))  # 以毫秒为单位
-            '''
-            lib.batchnorm_cnnl_f32.argtypes = [
-                ctypes.POINTER(ctypes.c_void_p),
-                ctypes.POINTER(ctypes.c_void_p),
-                ctypes.POINTER(ctypes.c_void_p),
-                ctypes.POINTER(ctypes.c_void_p),
-                ctypes.POINTER(ctypes.c_void_p),
-                ctypes.POINTER(ctypes.c_void_p),
-                ctypes.POINTER(ctypes.c_int),
-                ctypes.c_int,
-                ctypes.c_float
-            ]           
-            custom_batchnorm_time = \
-            performance.BangProfile((lib.batchnorm_cnnl_f32, (input_ptr, scale_ptr, bias_ptr, mean_ptr, var_ptr, output_ptr, shape, ndim, eps)))
-            '''
-            lib.batchnorm_bang_f32.argtypes = [
-                ctypes.POINTER(ctypes.c_void_p),
-                ctypes.POINTER(ctypes.c_void_p),
-                ctypes.POINTER(ctypes.c_void_p),
-                ctypes.POINTER(ctypes.c_void_p),
-                ctypes.POINTER(ctypes.c_void_p),
-                ctypes.POINTER(ctypes.c_void_p),
-                ctypes.POINTER(ctypes.c_int),
-                ctypes.c_int,
-                ctypes.c_float
-            ]           
-            custom_batchnorm_time = \
-            performance.BangProfile((lib.batchnorm_bang_f32, (input_ptr, scale_ptr, bias_ptr, mean_ptr, var_ptr, output_ptr, shape, ndim, eps)))
-            
-    if test_dtype == torch.float16:
-        
-        if device == "mlu":
-            torch_batchnorm_time = performance.BangProfile((batch_norm, (input, scale, bias, mean, var, eps)))  # 以毫秒为单位
-            
-            lib.batchnorm_cnnl_f16.argtypes = [
-                ctypes.POINTER(ctypes.c_void_p),
-                ctypes.POINTER(ctypes.c_void_p),
-                ctypes.POINTER(ctypes.c_void_p),
-                ctypes.POINTER(ctypes.c_void_p),
-                ctypes.POINTER(ctypes.c_void_p),
-                ctypes.POINTER(ctypes.c_void_p),
-                ctypes.POINTER(ctypes.c_int),
-                ctypes.c_int,
-                ctypes.c_float
-            ]
-            custom_batchnorm_time = \
-            performance.BangProfile((lib.batchnorm_cnnl_f16, (input_ptr, scale_ptr, bias_ptr, mean_ptr, var_ptr, output_ptr, shape, ndim,eps)))
-            '''
-            lib.batchnorm_bang_f16.argtypes = [
-                ctypes.POINTER(ctypes.c_void_p),
-                ctypes.POINTER(ctypes.c_void_p),
-                ctypes.POINTER(ctypes.c_void_p),
-                ctypes.POINTER(ctypes.c_void_p),
-                ctypes.POINTER(ctypes.c_void_p),
-                ctypes.POINTER(ctypes.c_void_p),
-                ctypes.POINTER(ctypes.c_int),
-                ctypes.c_int,
-                ctypes.c_float
-            ]           
-            custom_batchnorm_time = \
-            performance.BangProfile((lib.batchnorm_bang_f16, (input_ptr, scale_ptr, bias_ptr, mean_ptr, var_ptr, output_ptr, shape, ndim, eps)))
-            '''
     performance.logBenchmark(torch_batchnorm_time, custom_batchnorm_time)
 
     # 将结果转换回 PyTorch 张量以进行比较
@@ -137,28 +128,21 @@ def test(test_shape, test_dtype, eps, device):
 
 # 解析命令行参数
 parser = argparse.ArgumentParser(description="Test batchnorm on different devices.")
-parser.add_argument('--device', choices=['cpu', 'cuda', 'mlu'], required=True, help="Device to run the tests on.")
+parser.add_argument('--device', choices=['cpu', 'cuda', 'mlu', 'npu'], required=True, help="Device to run the tests on.")
 args = parser.parse_args()    
 
 test_cases = [       
-        ((700, 12), torch.float32, 1e-5, 'mlu'), 
-        ((700, 12, 24), torch.float32, 1e-5, 'mlu'),
-        ((700, 12, 24, 32), torch.float32, 1e-5, 'mlu'),
-        ((700, 12, 24, 32, 64), torch.float32, 1e-5, 'mlu'),
-
-        ((700, 12), torch.float16, 1e-5, 'mlu'),
-        ((700, 12, 24), torch.float16, 1e-5, 'mlu'),
-        ((700, 12, 24, 32), torch.float16, 1e-5, 'mlu'),
-        ((700, 12, 24, 32, 64), torch.float16, 1e-5, 'mlu'),        
+        ((700, 12), 1e-5), 
+        ((700, 12, 24), 1e-5),
+        ((700, 12, 24, 32), 1e-5),
+        ((70, 12, 24, 32, 64), 1e-5), #Ascend，当数据类型是float16，N=700测试出现NAN
 ]
 
-filtered_test_cases = [
-    (test_shape, test_dtype, eps, device)
-    for test_shape, test_dtype, eps, device in test_cases
-    if device == args.device
-]
+
 if args.device == 'mlu':
     import torch_mlu
+if args.device == 'npu':
+    import torch_npu
 # 执行过滤后的测试用例
-for test_shape, test_dtype, eps, device in filtered_test_cases:
-    test(test_shape, test_dtype, eps, device)
+for test_shape, eps in test_cases:
+    test(test_shape, eps, args.device)

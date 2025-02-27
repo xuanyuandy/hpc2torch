@@ -1,5 +1,6 @@
 #include "acl/acl.h"
 #include "aclnnop/aclnn_maximum.h"
+#include "aclnnop/aclnn_minimum.h"
 #include "aclnnop/level2/aclnn_add.h"
 #include "aclnnop/level2/aclnn_div.h"
 #include "aclnnop/level2/aclnn_mul.h"
@@ -19,6 +20,7 @@ struct BinaryMode
         Divide,
         Pow,
         Max,
+        Min,
 
         Count, ///< Number of binary operation types (marker for counting purposes).
     };
@@ -191,6 +193,31 @@ void binaryAclnnDevice(void *aData, void *bData, void *cData,
             printf("aclnnMaximum failed. ERROR: %d\n", ret);
         }
     }
+    else if (mode == BinaryMode::Min)
+    {
+        ret = aclnnMinimumGetWorkspaceSize(
+            inputATensor, inputBTensor, outputTensor, &workspaceSize, &executor);
+        if (ret != ACL_SUCCESS)
+        {
+            printf("aclnnMinimumGetWorkspaceSize failed. ERROR: %d\n", ret);
+        }
+        void *workspaceAddr = nullptr;
+        if (workspaceSize > 0)
+        {
+            ret = aclrtMalloc(&workspaceAddr, workspaceSize, ACL_MEM_MALLOC_HUGE_FIRST);
+            if (ret != ACL_SUCCESS)
+            {
+                printf("allocate workspace failed. ERROR: %d\n", ret);
+            }
+        }
+
+        ret = aclnnMinimum(workspaceAddr, workspaceSize, executor,
+                           stream);
+        if (ret != ACL_SUCCESS)
+        {
+            printf("aclnnMinimum failed. ERROR: %d\n", ret);
+        }
+    }
     else if (mode == BinaryMode::Add)
     {
         float bAlpha = 1.0f;
@@ -299,6 +326,23 @@ extern "C" void max_aclnn(void *aData, void *bData, void *cData,
         binaryAclnn<float>(aData, bData, cData,
                            aShape, bShape, cShape,
                            aDim, bDim, cDim, BinaryMode::Max);
+    }
+}
+extern "C" void min_aclnn(void *aData, void *bData, void *cData,
+                          int *aShape, int *bShape, int *cShape,
+                          int aDim, int bDim, int cDim, int byteSize)
+{
+    if (byteSize == 2)
+    {
+        binaryAclnn<uint16_t>(aData, bData, cData,
+                              aShape, bShape, cShape,
+                              aDim, bDim, cDim, BinaryMode::Min);
+    }
+    else if (byteSize == 4)
+    {
+        binaryAclnn<float>(aData, bData, cData,
+                           aShape, bShape, cShape,
+                           aDim, bDim, cDim, BinaryMode::Min);
     }
 }
 extern "C" void mul_aclnn(void *aData, void *bData, void *cData,

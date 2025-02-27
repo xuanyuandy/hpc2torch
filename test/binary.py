@@ -34,16 +34,8 @@ def bitwiseNot(x, y):
 def bitwisexor(x, y):
     return torch.bitwise_xor(x, y)
 def test(c_shape, a_shape, b_shape, device):
-    operator = "max"
-    # operator = "min"
-    # operator = "add"
-    # operator = "pow"
-    # operator = "div"
-    # operator = "mul"
-    # operator = "bitwiseOr"
-    print(
-        f"Testing {operator} on {device} with aShape:{a_shape}, bShape:{b_shape}, cShape:{c_shape}"
-    )
+    operators = ["max", "min", "add", "pow", "div", "mul", "bitwiseOr"]
+    operator = operators[1]
     byteSize = 2
     if (operator[:3] == "bit"):
         if byteSize == 2:
@@ -55,6 +47,10 @@ def test(c_shape, a_shape, b_shape, device):
             tensor_dtype = torch.float16
         elif byteSize == 4:
             tensor_dtype = torch.float32
+    print(
+        f"Testing {operator} on {device} with aShape:{a_shape}, bShape:{b_shape}, cShape:{c_shape}, dtype:{tensor_dtype}"
+    )
+    
     if tensor_dtype == torch.int16 or tensor_dtype == torch.int32:
         a = torch.ones(a_shape, dtype=tensor_dtype).to(device)
         b = 2 * torch.ones(b_shape, dtype=tensor_dtype).to(device)
@@ -244,6 +240,23 @@ def test(c_shape, a_shape, b_shape, device):
             custom_elementwise_time = \
             performance.BangProfile((lib.min_cnnl, (aData, bData, cData, aShape, bShape, cShape,
                                     aDim, bDim, cDim, byteSize)))
+        if device == "npu":
+            torch_elementwise_time = performance.AscendProfile((min, (a, b)))  # 可以替换为mul, div
+            lib.min_aclnn.argtypes = [
+                ctypes.POINTER(ctypes.c_void_p),
+                ctypes.POINTER(ctypes.c_void_p),
+                ctypes.POINTER(ctypes.c_void_p),
+                ctypes.POINTER(ctypes.c_int),
+                ctypes.POINTER(ctypes.c_int),
+                ctypes.POINTER(ctypes.c_int),
+                ctypes.c_int,
+                ctypes.c_int,
+                ctypes.c_int,
+                ctypes.c_int
+            ]
+            custom_elementwise_time = \
+            performance.AscendProfile((lib.min_aclnn, (aData, bData, cData, aShape, bShape, cShape,
+                                    aDim, bDim, cDim, byteSize)))                           
         performance.logBenchmark(torch_elementwise_time, custom_elementwise_time)
         # 将结果转换回 PyTorch 张量以进行比较
         tmpa = min(a, b).to('cpu').numpy().flatten()
@@ -394,7 +407,7 @@ def test(c_shape, a_shape, b_shape, device):
 
     atol = max(abs(tmpa - tmpb))
 
-    rtol = atol / max(abs(tmpb) + 1e-8)
+    rtol = atol / (max(abs(tmpb)) + 1e-8)
 
 
     print("absolute error:%.4e"%(atol))

@@ -6,7 +6,7 @@
 #include "npu/common_npu.h"
 
 template <typename T>
-void convTranAclnnDevice(void *input, void *scale, void *output, int *pads, int *strides, int *dilations, int *outpads, int *x_shape, int *w_shape, int *y_shape, int nDim, aclrtStream &stream)
+void convTransposeAclnnDevice(void *input, void *scale, void *output, int *pads, int *strides, int *dilations, int *outpads, int *x_shape, int *w_shape, int *y_shape, int nDim, aclrtStream &stream)
 {
     aclDataType dataType;
     if (sizeof(T) == 2)
@@ -132,7 +132,7 @@ void convTranAclnnDevice(void *input, void *scale, void *output, int *pads, int 
     // aclDestroyAclOpExecutor(executor);//似乎不支持destroy，一旦destroy测试报错
 }
 template <typename T>
-void convTranAclnn(void *input, void *scale, void *output, int *pads, int *strides, int *dilations, int *outpads, int *x_shape, int *w_shape, int *y_shape, int nDim)
+void convTransposeAclnn(void *input, void *scale, void *output, int *pads, int *strides, int *dilations, int *outpads, int *x_shape, int *w_shape, int *y_shape, int nDim)
 {
     // static int count = 0;
     // printf("count is %d \n", count);
@@ -145,17 +145,17 @@ void convTranAclnn(void *input, void *scale, void *output, int *pads, int *strid
         printf("Init acl failed. ERROR: %d\n", ret);
     }
 
-    convTranAclnnDevice<T>(input, scale, output, pads, strides, dilations, outpads, x_shape, w_shape, y_shape, nDim, stream);
+    convTransposeAclnnDevice<T>(input, scale, output, pads, strides, dilations, outpads, x_shape, w_shape, y_shape, nDim, stream);
     Finalize(deviceId, stream);
 }
-extern "C" void convTran_aclnn(void *input, void *scale, void *output, int *pads, int *strides, int *dilations, int *outpads, int *x_shape, int *w_shape, int *y_shape, int nDim, int byteSize)
+extern "C" void convTranspose_aclnn(void *input, void *scale, void *output, int *pads, int *strides, int *dilations, int *outpads, int *x_shape, int *w_shape, int *y_shape, int nDim, int byteSize)
 {
     if (byteSize == 2)
     {
-        convTranAclnn<uint16_t>(input, scale, output, pads, strides, dilations, outpads, x_shape, w_shape, y_shape, nDim);
+        convTransposeAclnn<uint16_t>(input, scale, output, pads, strides, dilations, outpads, x_shape, w_shape, y_shape, nDim);
     }
     else if (byteSize == 4)
     {
-        convTranAclnn<float>(input, scale, output, pads, strides, dilations, outpads, x_shape, w_shape, y_shape, nDim);
+        convTransposeAclnn<float>(input, scale, output, pads, strides, dilations, outpads, x_shape, w_shape, y_shape, nDim);
     }
 }

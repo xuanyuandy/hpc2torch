@@ -71,8 +71,8 @@ def test(x_shape, w_shape, pads, strides, dilations, device):
     x = torch.rand(x_shape, dtype=test_dtype).to(device)
     w = torch.rand(w_shape, dtype=test_dtype).to(device)
     y_shape = inferShape(x.shape, w.shape, pads, strides, dilations)
-    y = torch.zeros(y_shape, dtype=test_dtype).to(device);print(y.shape)
-    tmpa = convTran(x, w, strides, pads, dilations);print(tmpa.shape)
+    y = torch.zeros(y_shape, dtype=test_dtype).to(device)
+    tmpa = convTran(x, w, strides, pads, dilations)
     x_ptr = ctypes.cast(x.data_ptr(), ctypes.POINTER(ctypes.c_void_p))
     w_ptr = ctypes.cast(w.data_ptr(), ctypes.POINTER(ctypes.c_void_p))
     y_ptr = ctypes.cast(y.data_ptr(), ctypes.POINTER(ctypes.c_void_p))
@@ -118,7 +118,7 @@ def test(x_shape, w_shape, pads, strides, dilations, device):
         performance.BangProfile((lib.convTranspose_cnnl, (x_ptr, w_ptr, y_ptr, pData, sData, dData, xShape, wShape, yShape, ndim, byteSize)))
     elif device == "npu":
         torch_convTranspose_time = performance.AscendProfile((convTran, (x, w, strides, pads, dilations))) 
-        lib.convTranspose_cnnl.argtypes = [
+        lib.convTranspose_aclnn.argtypes = [
             ctypes.POINTER(ctypes.c_void_p),
             ctypes.POINTER(ctypes.c_void_p),
             ctypes.POINTER(ctypes.c_void_p),
@@ -133,7 +133,7 @@ def test(x_shape, w_shape, pads, strides, dilations, device):
             ctypes.c_int
         ]           
         custom_convTranspose_time = \
-        performance.AscendProfile((lib.convTranspose_cnnl, (x_ptr, w_ptr, y_ptr, pData, sData, dData, oData, xShape, wShape, yShape, ndim, byteSize)))
+        performance.AscendProfile((lib.convTranspose_aclnn, (x_ptr, w_ptr, y_ptr, pData, sData, dData, oData, xShape, wShape, yShape, ndim, byteSize)))
             
     performance.logBenchmark(torch_convTranspose_time, custom_convTranspose_time)
     
@@ -168,7 +168,7 @@ test_cases = [
             (2, 2),
             (2, 2),
             (1, 1)), 
-        ((1, 2, 4, 4, 4),
+        ((1, 2, 4, 4, 4), #当ndim=5时，昇腾机器不支持f32计算，应该是昇腾机器的torch.convtranspose不支持，torch.conv3d有同样问题
             (2, 1, 5, 5, 5),
             (1, 1, 1),
             (1, 1, 1),

@@ -99,7 +99,7 @@ void gatherCnnl(void const *input, void const *indices, void *output,
     cnnlDestroy(handle);
     CNRT_CHECK(cnrtQueueDestroy(queue));
 }
-extern "C" void gather_cnnl_f32(void const *input, void const *indices, void *output,
+extern "C" void gather_cnnl(void const *input, void const *indices, void *output,
                                 int *x_shape, int *w_shape, int *y_shape,
                                 int x_ndim, int w_ndim, int y_ndim, int axis, int byteSize)
 {

@@ -27,7 +27,7 @@ def test(inputShape, indexShape, axis, device):
     indexTensor = torch.randint(0, inputShape[axis], indexShape, device=device, dtype=torch.int32)
     if(device == "cuda"):#有些国产平台比如说MLU不支持int64计算
         indexTensor = indexTensor.to(int64)
-    print(max(indexTensor.flatten()))
+    
 
     outputShape = indexShape
     Q_output = torch.zeros(outputShape, device=device, dtype=test_dtype)
@@ -60,6 +60,21 @@ def test(inputShape, indexShape, axis, device):
         ]
         custom_gatherElements_time = performance.BangProfile((lib.gatherElements_cnnl, 
         (input_ptr, index_ptr, output_ptr, x_shape, w_shape, y_shape, ndim, axis, byteSize))) 
+    elif device == "npu":
+        torch_gatherElements_time = performance.AscendProfile((gatherElements, (inputTensor, indexTensor, axis)))
+        lib.gatherElements_aclnn.argtypes = [
+            ctypes.POINTER(ctypes.c_void_p),
+            ctypes.POINTER(ctypes.c_void_p),
+            ctypes.POINTER(ctypes.c_void_p),
+            ctypes.POINTER(ctypes.c_int),
+            ctypes.POINTER(ctypes.c_int),
+            ctypes.POINTER(ctypes.c_int),
+            ctypes.c_int,
+            ctypes.c_int,
+            ctypes.c_int
+        ]
+        custom_gatherElements_time = performance.AscendProfile((lib.gatherElements_aclnn, 
+        (input_ptr, index_ptr, output_ptr, x_shape, w_shape, y_shape, ndim, axis, byteSize))) 
     performance.logBenchmark(torch_gatherElements_time, custom_gatherElements_time)
 
     tmpa = gatherElements(inputTensor, indexTensor, axis).to('cpu').numpy().flatten()
@@ -72,7 +87,7 @@ def test(inputShape, indexShape, axis, device):
     print("absolute error:%.4e"%(atol))
     print("relative error:%.4e"%(rtol))
 parser = argparse.ArgumentParser(description="Test gatherElements on different devices.")
-parser.add_argument('--device', choices=['cpu', 'cuda', 'mlu'], required=True, help="Device to run the tests on.")
+parser.add_argument('--device', choices=['cpu', 'cuda', 'mlu', 'npu'], required=True, help="Device to run the tests on.")
 args = parser.parse_args()    
 test_cases = [
         # inputShape , indexShape, axis, test_dtype, device
@@ -89,6 +104,8 @@ test_cases = [
 
 if args.device == 'mlu':
     import torch_mlu
+if args.device == 'npu':
+    import torch_npu
 # 执行过滤后的测试用例
 for inputShape , indexShape, axis in test_cases:
     test(inputShape , indexShape, axis, args.device)

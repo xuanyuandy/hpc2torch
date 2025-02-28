@@ -7,7 +7,7 @@
 template <typename T>
 void clipAclnnDevice(void *input, void *output,
                      int *shape, int nDim,
-                     T minValue, T maxValue, aclrtStream &stream)
+                     float minValue, float maxValue, aclrtStream &stream)
 {
     aclDataType dataType;
     if (sizeof(T) == 2)
@@ -46,8 +46,8 @@ void clipAclnnDevice(void *input, void *output,
                         outputDim.data(), outputDim.size(), output);
     aclScalar *max = nullptr;
     aclScalar *min = nullptr;
-    max = aclCreateScalar(&maxValue, dataType);
-    min = aclCreateScalar(&minValue, dataType);
+    max = aclCreateScalar(&maxValue, aclDataType::ACL_FLOAT); // 如果input数据类型是f16，min,max也要使用f32，否则结果报错
+    min = aclCreateScalar(&minValue, aclDataType::ACL_FLOAT);
     // 下面开始正式计算
     uint64_t workspaceSize = 0;
     aclOpExecutor *executor;
@@ -93,7 +93,7 @@ void clipAclnnDevice(void *input, void *output,
 template <typename T>
 void clipAclnn(void *input, void *output,
                int *shape, int nDim,
-               T minValue, T maxValue)
+               float minValue, float maxValue)
 {
     // static int count = 0;
     // printf("count is %d \n", count);
@@ -123,10 +123,9 @@ extern "C" void clip_aclnn(void *input, void *output,
     }
     else if (byteSize == 2)
     {
-        uint16_t minV = static_cast<uint16_t>(minValue);
-        uint16_t maxV = static_cast<uint16_t>(maxValue);
+
         clipAclnn<uint16_t>(input, output,
                             shape, nDim,
-                            minV, maxV);
+                            minValue, maxValue);
     }
 }

@@ -57,9 +57,9 @@ void gatherAclnnDevice(void *input, void *indices, void *output,
                         inputStride.data(), 0, format,
                         inputDim.data(), inputDim.size(), input); // const aclTensor *inputTensor
     auto indicesTensor =
-        aclCreateTensor(indicesDim.data(), indicesDim.size(), dataType,
+        aclCreateTensor(indicesDim.data(), indicesDim.size(), aclDataType::ACL_INT32,
                         indicesStride.data(), 0, format,
-                        indicesDim.data(), indicesDim.size(), input);
+                        indicesDim.data(), indicesDim.size(), indices);
     auto outputTensor =
         aclCreateTensor(outputDim.data(), outputDim.size(), dataType,
                         outputStride.data(), 0, format,

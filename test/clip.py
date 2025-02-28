@@ -73,6 +73,20 @@ def test(test_shape, minValue, maxValue, device):
         ]
         custom_clip_time = \
         performance.BangProfile((lib.clip_cnnl, (input_ptr, output_ptr, aShape, len(test_shape), minValue, maxValue, byteSize)))
+    elif device == "npu":
+        torch_clip_time = performance.AscendProfile((torch.clip, (aData, minValue, maxValue)))  # 可以替换为mul, div
+        lib.clip_aclnn.argtypes = [
+            ctypes.POINTER(ctypes.c_void_p),
+            ctypes.POINTER(ctypes.c_void_p),
+            ctypes.POINTER(ctypes.c_int),
+            ctypes.c_int,
+            ctypes.c_float,
+            ctypes.c_float,
+            ctypes.c_int
+
+        ]
+        custom_clip_time = \
+        performance.AscendProfile((lib.clip_aclnn, (input_ptr, output_ptr, aShape, len(test_shape), minValue, maxValue, byteSize)))
     performance.logBenchmark(torch_clip_time, custom_clip_time)
     tmpa = torch.clip(aData, minValue, maxValue).to('cpu').numpy().flatten()
     tmpb = cData.to('cpu').numpy().flatten()
@@ -85,7 +99,7 @@ def test(test_shape, minValue, maxValue, device):
     print("absolute error:%.4e"%(atol))
     print("relative error:%.4e"%(rtol))
 parser = argparse.ArgumentParser(description="Test clip on different devices.")
-parser.add_argument('--device', choices=['cpu', 'cuda', 'mlu'], required=True, help="Device to run the tests on.")
+parser.add_argument('--device', choices=['cpu', 'cuda', 'mlu', 'npu'], required=True, help="Device to run the tests on.")
 args = parser.parse_args()    
 test_cases = [
         # 
@@ -98,6 +112,8 @@ test_cases = [
 
 if args.device == 'mlu':
     import torch_mlu
+if args.device == 'npu':
+    import torch_npu
 # 执行过滤后的测试用例
 for test_shape, minValue, maxValue in test_cases:
     test(test_shape, minValue, maxValue, args.device)

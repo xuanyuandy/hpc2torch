@@ -101,17 +101,18 @@ void gatherCnnl(void const *input, void const *indices, void *output,
 }
 extern "C" void gather_cnnl_f32(void const *input, void const *indices, void *output,
                                 int *x_shape, int *w_shape, int *y_shape,
-                                int x_ndim, int w_ndim, int y_ndim, int axis)
+                                int x_ndim, int w_ndim, int y_ndim, int axis, int byteSize)
 {
-    gatherCnnl<float, int32_t>(input, indices, output,
-                               x_shape, w_shape, y_shape,
-                               x_ndim, w_ndim, y_ndim, axis);
-}
-extern "C" void gather_cnnl_f16(void const *input, void const *indices, void *output,
-                                int *x_shape, int *w_shape, int *y_shape,
-                                int x_ndim, int w_ndim, int y_ndim, int axis)
-{
-    gatherCnnl<uint16_t, int32_t>(input, indices, output,
-                                  x_shape, w_shape, y_shape,
-                                  x_ndim, w_ndim, y_ndim, axis);
+    if (byteSize == 2)
+    {
+        gatherCnnl<uint16_t, int32_t>(input, indices, output,
+                                      x_shape, w_shape, y_shape,
+                                      x_ndim, w_ndim, y_ndim, axis);
+    }
+    else if (byteSize == 4)
+    {
+        gatherCnnl<float, int32_t>(input, indices, output,
+                                   x_shape, w_shape, y_shape,
+                                   x_ndim, w_ndim, y_ndim, axis);
+    }
 }

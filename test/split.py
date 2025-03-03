@@ -98,7 +98,20 @@ def test(xShape, axis, split_size_or_sections, device):
         ]
         custom_split_time = \
         performance.BangProfile((lib.split_cnnl, (input_ptr, output_ptrs_ctypes, inputShape, yShape_ctypes, num_outputs, axis, ndim, byteSize)))
-    
+    elif device == "npu":
+        torch_split_time = performance.AscendProfile((splitFunction, (input, split_size_or_sections, axis)))  # 以毫秒为单位
+        lib.split_aclnn.argtypes = [
+            ctypes.POINTER(ctypes.c_void_p),
+            ctypes.POINTER(ctypes.POINTER(ctypes.c_void_p)),
+            ctypes.POINTER(ctypes.c_int),
+            ctypes.POINTER(ctypes.POINTER(ctypes.c_int)),
+            ctypes.c_int,
+            ctypes.c_int,
+            ctypes.c_int,
+            ctypes.c_int
+        ]
+        custom_split_time = \
+        performance.AscendProfile((lib.split_aclnn, (input_ptr, output_ptrs_ctypes, inputShape, yShape_ctypes, num_outputs, axis, ndim, byteSize)))
     performance.logBenchmark(torch_split_time, custom_split_time)
     # 将结果转换回 PyTorch 张量以进行比较
     atol = 0

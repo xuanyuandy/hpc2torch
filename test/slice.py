@@ -84,6 +84,25 @@ def test(shape, beginValue, endValue, strideValue, device):
         performance.BangProfile((lib.slice_cnnl, (input_ptr, output_ptr, 
         inputShape, outputShape, begin_ptr, end_ptr, stride_ptr, 
         ndim, len(yShape), len(beginValue), byteSize)))
+    elif device == "npu":
+        torch_slice_time = performance.AscendProfile((sliceFunction, (input, begin, end, stride)))  # 以毫秒为单位
+        lib.slice_aclnn.argtypes = [
+            ctypes.POINTER(ctypes.c_void_p),
+            ctypes.POINTER(ctypes.c_void_p),
+            ctypes.POINTER(ctypes.c_int),
+            ctypes.POINTER(ctypes.c_int),
+            ctypes.POINTER(ctypes.c_int),
+            ctypes.POINTER(ctypes.c_int),
+            ctypes.POINTER(ctypes.c_int),
+            ctypes.c_int,
+            ctypes.c_int,
+            ctypes.c_int,
+            ctypes.c_int
+        ]
+        custom_slice_time = \
+        performance.AscendProfile((lib.slice_aclnn, (input_ptr, output_ptr, 
+        inputShape, outputShape, begin_ptr, end_ptr, stride_ptr, 
+        ndim, len(yShape), len(beginValue), byteSize)))
     
     performance.logBenchmark(torch_slice_time, custom_slice_time)
     # 将结果转换回 PyTorch 张量以进行比较

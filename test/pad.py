@@ -67,6 +67,22 @@ def test(shape, Pad, device):
         performance.BangProfile((lib.pad_cnnl, (input_ptr, hostPad_ptr, hostValue_ptr, output_ptr, 
         inputShape, outputShape, 
         ndim, byteSize)))
+    elif device == "npu":
+        torch_pad_time = performance.AscendProfile((padFunction, (input, Pad, hostValue[0])))  # 以毫秒为单位
+        lib.pad_aclnn.argtypes = [
+            ctypes.POINTER(ctypes.c_void_p),
+            ctypes.POINTER(ctypes.c_int),
+            ctypes.POINTER(ctypes.c_void_p),
+            ctypes.POINTER(ctypes.c_void_p),
+            ctypes.POINTER(ctypes.c_int),
+            ctypes.POINTER(ctypes.c_int),
+            ctypes.c_int,
+            ctypes.c_int
+        ]
+        custom_pad_time = \
+        performance.AscendProfile((lib.pad_aclnn, (input_ptr, hostPad_ptr, hostValue_ptr, output_ptr, 
+        inputShape, outputShape, 
+        ndim, byteSize)))
     
     performance.logBenchmark(torch_pad_time, custom_pad_time)
     # 将结果转换回 PyTorch 张量以进行比较

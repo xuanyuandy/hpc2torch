@@ -137,7 +137,10 @@ void batchnormAclnnDevice(void *input, void *scale,
     aclDestroyTensor(biasTensor);
     aclDestroyTensor(savemeanTensor);
     aclDestroyTensor(saveinvstdTensor);
-
+    if (workspaceSize > 0)
+    {
+        aclrtFree(workspaceAddr);
+    }
     // aclDestroyAclOpExecutor(executor);//似乎不支持destroy，一旦destroy测试报错
 }
 template <typename T>

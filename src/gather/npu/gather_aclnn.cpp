@@ -103,7 +103,10 @@ void gatherAclnnDevice(void *input, void *indices, void *output,
     aclDestroyTensor(inputTensor);
     aclDestroyTensor(indicesTensor);
     aclDestroyTensor(outputTensor);
-
+    if (workspaceSize > 0)
+    {
+        aclrtFree(workspaceAddr);
+    }
     // aclDestroyAclOpExecutor(executor);//似乎不支持destroy，一旦destroy测试报错
 }
 template <typename T>

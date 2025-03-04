@@ -127,7 +127,10 @@ void convolutionAclnnDevice(void *input, void *scale, void *output, int *pads, i
     aclDestroyIntArray(convpads);
     aclDestroyIntArray(convOutputpadding);
     aclDestroyIntArray(convdilation);
-
+    if (workspaceSize > 0)
+    {
+        aclrtFree(workspaceAddr);
+    }
     // aclDestroyAclOpExecutor(executor);//似乎不支持destroy，一旦destroy测试报错
 }
 template <typename T>

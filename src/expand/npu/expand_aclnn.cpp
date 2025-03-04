@@ -85,7 +85,10 @@ void expandAclnnDevice(void *input, void *output, int *inputShape, int *outputSh
     aclDestroyTensor(outputTensor);
 
     aclDestroyIntArray(expandSize);
-
+    if (workspaceSize > 0)
+    {
+        aclrtFree(workspaceAddr);
+    }
     // aclDestroyAclOpExecutor(executor);//似乎不支持destroy，一旦destroy测试报错
 }
 template <typename T>

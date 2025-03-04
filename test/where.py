@@ -89,6 +89,27 @@ def test(xShape, yShape, zShape, device):
         performance.BangProfile((lib.where_cnnl, (a_ptr, b_ptr, c_ptr, output_ptr, 
         aShape, bShape, cShape, dShape,
         aDim, bDim, cDim, dDim, byteSize)))
+    elif device == "npu":
+        torch_where_time = performance.AscendProfile((whereFunction, (a, b, c)))  # 以毫秒为单位
+        lib.where_aclnn.argtypes = [
+            ctypes.POINTER(ctypes.c_void_p),
+            ctypes.POINTER(ctypes.c_void_p),
+            ctypes.POINTER(ctypes.c_void_p),
+            ctypes.POINTER(ctypes.c_void_p),
+            ctypes.POINTER(ctypes.c_int),
+            ctypes.POINTER(ctypes.c_int),
+            ctypes.POINTER(ctypes.c_int),
+            ctypes.POINTER(ctypes.c_int),
+            ctypes.c_int,
+            ctypes.c_int,
+            ctypes.c_int,
+            ctypes.c_int,
+            ctypes.c_int
+        ]
+        custom_where_time = \
+        performance.AscendProfile((lib.where_aclnn, (a_ptr, b_ptr, c_ptr, output_ptr, 
+        aShape, bShape, cShape, dShape,
+        aDim, bDim, cDim, dDim, byteSize)))
     
     performance.logBenchmark(torch_where_time, custom_where_time)
     # 将结果转换回 PyTorch 张量以进行比较

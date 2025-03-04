@@ -380,6 +380,10 @@ void pReluAclnnDevice(void *aData, void *bData, void *cData, int *aShape, int *b
     aclDestroyTensor(inputTensor);
     aclDestroyTensor(weightTensor);
     aclDestroyTensor(outputTensor);
+    if (workspaceSize > 0)
+    {
+        aclrtFree(workspaceAddr);
+    }
 }
 template <typename T>
 void unaryAclnn(void *aData, void *cData, int *aShape, int *cShape,

@@ -78,6 +78,20 @@ def test(c_shape, axis, input_shapes, device):
         ]
         custom_concat_time = \
         performance.BangProfile((lib.concat_cnnl, (input_ptrs_ctypes, output_ptr, input_shapes_ctypes, outputShape, num_inputs, axis, ndim, byteSize)))
+    elif device == "npu":
+        torch_concat_time = performance.AscendProfile((concatFunction, (inputs, axis)))  # 以毫秒为单位
+        lib.concat_aclnn.argtypes = [
+            ctypes.POINTER(ctypes.POINTER(ctypes.c_void_p)),
+            ctypes.POINTER(ctypes.c_void_p),
+            ctypes.POINTER(ctypes.POINTER(ctypes.c_int)),
+            ctypes.POINTER(ctypes.c_int),
+            ctypes.c_int,
+            ctypes.c_int,
+            ctypes.c_int,
+            ctypes.c_int
+        ]
+        custom_concat_time = \
+        performance.AscendProfile((lib.concat_aclnn, (input_ptrs_ctypes, output_ptr, input_shapes_ctypes, outputShape, num_inputs, axis, ndim, byteSize)))
     
     performance.logBenchmark(torch_concat_time, custom_concat_time)
     # 将结果转换回 PyTorch 张量以进行比较

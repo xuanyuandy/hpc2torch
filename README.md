@@ -27,7 +27,22 @@ pool算子在f16，ndim=5的数据测试中，avgpool精度只有1e-3，但是ma
 
 clip算子在f16数据测试中精度存在巨大问题，f32正常，原因不明
 
+layernorm算子cnnl不支持axis=0，手写算子处理axis=0,f16时必须控制规模，规模太大会导致精度无法对齐
+
+寒武纪reduce算子处理sum,prod时，规模太大也会带来精度问题，应该是累积误差导致
+
 ## 昇腾平台
 conv算子面对f32，ndim=5测试报错，但是f16，ndim=5精度正常，原因是昇腾机器torch.conv3d不支持f32，convTranspose有类似问题
 
 pool算子处理ndim=3的avgpool测试精度出错，昇腾平台目前缺少支持ndim=5的maxPool库函数
+
+昇腾调库softmax处理f16数据精度不足
+
+昇腾reduce算子min,prod仅支持针对某一个维度做规约，不支持同时处理多个axis
+
+昇腾clip不管input是f16还是f32，传入的min,max都必须是f32，否则结果报错
+
+## 算子定义
+batchnorm算子有一个momentum参数，onnx默认值是0.9，torch默认是0.1
+
+slice算子onnx定义中有一个optional参数axis指定切片维度，但是寒武纪和昇腾库函数不支持这个参数

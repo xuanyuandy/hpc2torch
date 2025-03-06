@@ -31,11 +31,8 @@ def test(inputShape, axis, num, device):
     print(
         f"Testing Extend on {device} with x_shape:{inputShape} , axis:{axis} ,num:{num}, dtype:{test_dtype}"
     )
-    #inputTensor = torch.rand(inputShape, device=device, dtype=test_dtype)
-    oSize = 1
-    for i in range(len(inputShape)):
-        oSize *= inputShape[i]
-    inputTensor = torch.arange(oSize, device=device, dtype=test_dtype).reshape(inputShape)
+    ndim = len(inputShape)
+    inputTensor = torch.rand(inputShape, device=device, dtype=test_dtype)
     
     frontsize = 1
     outputShape = list(inputShape)
@@ -76,7 +73,21 @@ def test(inputShape, axis, num, device):
     
         custom_extend_time = performance.CudaProfile((lib.extend_nv, 
         (input_ptr, output_ptr, num, frontsize, dimsize, stride, byteSize)))
+    elif device == "mlu":
+        torch_extend_time = performance.BangProfile((extend, (inputTensor, axis, num)))
+        lib.extend_cnnl.argtypes = [
+            ctypes.POINTER(ctypes.c_void_p),
+            ctypes.POINTER(ctypes.c_void_p),
+            ctypes.POINTER(ctypes.c_int),
+            ctypes.POINTER(ctypes.c_int),
+            ctypes.c_int,
+            ctypes.c_int,
+            ctypes.c_int,
+            ctypes.c_int
+        ]
     
+        custom_extend_time = performance.BangProfile((lib.extend_cnnl, 
+        (input_ptr, output_ptr, x_shape, y_shape, ndim, num, axis, byteSize)))
     
     performance.logBenchmark(torch_extend_time, custom_extend_time)
     # print(inputTensor[:,0], extend(inputTensor, axis, num)[:,0] , outTensor[:,0])

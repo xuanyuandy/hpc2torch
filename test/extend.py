@@ -88,6 +88,21 @@ def test(inputShape, axis, num, device):
     
         custom_extend_time = performance.BangProfile((lib.extend_cnnl, 
         (input_ptr, output_ptr, x_shape, y_shape, ndim, num, axis, byteSize)))
+    elif device == "npu":
+        torch_extend_time = performance.AscendProfile((extend, (inputTensor, axis, num)))
+        lib.extend_aclnn.argtypes = [
+            ctypes.POINTER(ctypes.c_void_p),
+            ctypes.POINTER(ctypes.c_void_p),
+            ctypes.POINTER(ctypes.c_int),
+            ctypes.POINTER(ctypes.c_int),
+            ctypes.c_int,
+            ctypes.c_int,
+            ctypes.c_int,
+            ctypes.c_int
+        ]
+    
+        custom_extend_time = performance.AscendProfile((lib.extend_aclnn, 
+        (input_ptr, output_ptr, x_shape, y_shape, ndim, num, axis, byteSize)))
     
     performance.logBenchmark(torch_extend_time, custom_extend_time)
     # print(inputTensor[:,0], extend(inputTensor, axis, num)[:,0] , outTensor[:,0])

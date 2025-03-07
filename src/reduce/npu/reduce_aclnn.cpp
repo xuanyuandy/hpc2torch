@@ -47,10 +47,12 @@ void reduceAclnnDevice(void *aData, int *axes, void *cData,
     std::vector<int64_t> outputDim(ndim);
     std::vector<int64_t> outputStride(ndim, 1);
     std::vector<int64_t> axes_64(axesDim);
+    int64_t iSize = 1;
     for (int i = ndim - 1; i >= 0; i--)
     {
         inputDim[i] = int64_t(aShape[i]);
         outputDim[i] = int64_t(cShape[i]);
+        iSize *= inputDim[i];
         if (i < ndim - 1)
         {
             inputStride[i] = inputDim[i + 1] * inputStride[i + 1];
@@ -128,58 +130,184 @@ void reduceAclnnDevice(void *aData, int *axes, void *cData,
             printf("aclnnMeanV2 failed. ERROR: %d\n", ret);
         }
     }
-    // else if (mode == ReduceMode::Min)
-    // {//似乎只支持针对某固定维度求min
-    //     ret = aclnnMinDimGetWorkspaceSize(
-    //         inputTensor, dim, KeepDim, outputTensor, nullptr, &workspaceSize, &executor);
-    //     if (ret != ACL_SUCCESS)
-    //     {
-    //         printf("aclnnMinDimGetWorkspaceSize failed. ERROR: %d\n", ret);
-    //     }
-    //     void *workspaceAddr = nullptr;
-    //     if (workspaceSize > 0)
-    //     {
-    //         ret = aclrtMalloc(&workspaceAddr, workspaceSize, ACL_MEM_MALLOC_HUGE_FIRST);
+    else if (mode == ReduceMode::Min)
+    { // 似乎只支持针对某固定维度求min
 
-    //         if (ret != ACL_SUCCESS)
-    //         {
-    //             printf("allocate workspace failed. ERROR: %d\n", ret);
-    //         }
-    //     }
+        std::vector<int64_t> tmpInDim = inputDim;
+        std::vector<int64_t> tmpInStride = inputStride;
+        std::vector<int64_t> tmpOutDim = inputDim;
+        std::vector<int64_t> tmpOutStride = inputStride;
+        void *tmpInData;
+        void *tmpIndicesData;
+        void *tmpOutData;
+        ret = aclrtMalloc((void **)&tmpInData, iSize * sizeof(T), ACL_MEM_MALLOC_HUGE_FIRST);
+        ret = aclrtMalloc((void **)&tmpIndicesData, iSize * sizeof(int), ACL_MEM_MALLOC_HUGE_FIRST);
+        ret = aclrtMalloc((void **)&tmpOutData, iSize * sizeof(T), ACL_MEM_MALLOC_HUGE_FIRST);
+        if (ret != ACL_SUCCESS)
+        {
+            printf("aclrtMalloc failed. ERROR: %d\n", ret);
+        }
+        ret = aclrtMemcpy(tmpInData, iSize * sizeof(T), aData, iSize * sizeof(T), ACL_MEMCPY_DEVICE_TO_DEVICE);
+        ret = aclrtMemcpy(tmpOutData, iSize * sizeof(T), aData, iSize * sizeof(T), ACL_MEMCPY_DEVICE_TO_DEVICE);
+        if (ret != ACL_SUCCESS)
+        {
+            printf("aclrtMemcpy failed. ERROR: %d\n", ret);
+        }
+        int64_t oSize = iSize;
+        aclTensor *tmpInTensor = nullptr;
+        aclTensor *tmpIndicesTensor = nullptr;
+        aclTensor *tmpOutTensor = nullptr;
+        for (int i = 0; i < axesDim; i++)
+        {
+            tmpOutDim[axes[i]] = 1;
+            oSize = oSize / inputDim[axes[i]];
+            for (int j = ndim - 2; j >= 0; j--)
+            {
+                tmpOutStride[j] = tmpOutStride[j + 1] * tmpOutDim[j + 1];
+            }
+            tmpInTensor =
+                aclCreateTensor(tmpInDim.data(), tmpInDim.size(), dataType,
+                                tmpInStride.data(), 0, format,
+                                tmpInDim.data(), tmpInDim.size(), tmpInData);
+            tmpIndicesTensor =
+                aclCreateTensor(tmpOutDim.data(), tmpOutDim.size(), aclDataType::ACL_INT32,
+                                tmpOutStride.data(), 0, format,
+                                tmpOutDim.data(), tmpOutDim.size(), tmpIndicesData);
 
-    //     ret = aclnnMinDim(workspaceAddr, workspaceSize, executor,
-    //                       stream);
-    //     if (ret != ACL_SUCCESS)
-    //     {
-    //         printf("aclnnMinDim failed. ERROR: %d\n", ret);
-    //     }
-    // }
-    // else if (mode == ReduceMode::Prod)
-    // {
-    //     ret = aclnnProdDimGetWorkspaceSize(
-    //         inputTensor, dim, KeepDim, dataType, outputTensor, &workspaceSize, &executor);
-    //     if (ret != ACL_SUCCESS)
-    //     {
-    //         printf("aclnnProdDimGetWorkspaceSize failed. ERROR: %d\n", ret);
-    //     }
-    //     void *workspaceAddr = nullptr;
-    //     if (workspaceSize > 0)
-    //     {
-    //         ret = aclrtMalloc(&workspaceAddr, workspaceSize, ACL_MEM_MALLOC_HUGE_FIRST);
+            tmpOutTensor =
+                aclCreateTensor(tmpOutDim.data(), tmpOutDim.size(), dataType,
+                                tmpOutStride.data(), 0, format,
+                                tmpOutDim.data(), tmpOutDim.size(), tmpOutData);
+            ret = aclnnMinDimGetWorkspaceSize(
+                tmpInTensor, int64_t(axes[i]), KeepDim, tmpOutTensor, tmpIndicesTensor, &workspaceSize, &executor);
+            if (ret != ACL_SUCCESS)
+            {
+                printf("aclnnMinDimGetWorkspaceSize failed. ERROR: %d\n", ret);
+            }
+            void *workspaceAddr = nullptr;
+            if (workspaceSize > 0)
+            {
+                ret = aclrtMalloc(&workspaceAddr, workspaceSize, ACL_MEM_MALLOC_HUGE_FIRST);
 
-    //         if (ret != ACL_SUCCESS)
-    //         {
-    //             printf("allocate workspace failed. ERROR: %d\n", ret);
-    //         }
-    //     }
+                if (ret != ACL_SUCCESS)
+                {
+                    printf("allocate workspace failed. ERROR: %d\n", ret);
+                }
+            }
+            ret = aclnnMinDim(workspaceAddr, workspaceSize, executor,
+                              stream);
+            if (ret != ACL_SUCCESS)
+            {
+                printf("aclnnMinDim failed. ERROR: %d\n", ret);
+            }
+            ret = aclrtSynchronizeStream(stream);
 
-    //     ret = aclnnProdDim(workspaceAddr, workspaceSize, executor,
-    //                        stream);
-    //     if (ret != ACL_SUCCESS)
-    //     {
-    //         printf("aclnnProdDim failed. ERROR: %d\n", ret);
-    //     }
-    // }
+            if (ret != ACL_SUCCESS)
+            {
+                printf("aclrtSynchronizeStream failed. ERROR: %d\n", ret);
+            }
+            ret = aclrtMemcpy(tmpInData, oSize * sizeof(T), tmpOutData, oSize * sizeof(T), ACL_MEMCPY_DEVICE_TO_DEVICE);
+            for (int j = ndim - 1; j >= 0; j--)
+            {
+                tmpInDim[j] = tmpOutDim[j];
+            }
+            for (int j = ndim - 2; j >= 0; j--)
+            {
+                tmpInStride[j] = tmpInStride[j + 1] * tmpInDim[j + 1];
+            }
+        }
+        ret = aclrtMemcpy(cData, oSize * sizeof(T), tmpOutData, oSize * sizeof(T), ACL_MEMCPY_DEVICE_TO_DEVICE);
+        aclDestroyTensor(tmpInTensor);
+        aclDestroyTensor(tmpIndicesTensor);
+        aclDestroyTensor(tmpOutTensor);
+        aclrtFree(tmpInData);
+        aclrtFree(tmpIndicesData);
+        aclrtFree(tmpOutData);
+    }
+    else if (mode == ReduceMode::Prod)
+    {
+        std::vector<int64_t> tmpInDim = inputDim;
+        std::vector<int64_t> tmpInStride = inputStride;
+        std::vector<int64_t> tmpOutDim = inputDim;
+        std::vector<int64_t> tmpOutStride = inputStride;
+        void *tmpInData;
+        void *tmpOutData;
+        ret = aclrtMalloc((void **)&tmpInData, iSize * sizeof(T), ACL_MEM_MALLOC_HUGE_FIRST);
+        ret = aclrtMalloc((void **)&tmpOutData, iSize * sizeof(T), ACL_MEM_MALLOC_HUGE_FIRST);
+        if (ret != ACL_SUCCESS)
+        {
+            printf("aclrtMalloc failed. ERROR: %d\n", ret);
+        }
+        ret = aclrtMemcpy(tmpInData, iSize * sizeof(T), aData, iSize * sizeof(T), ACL_MEMCPY_DEVICE_TO_DEVICE);
+        ret = aclrtMemcpy(tmpOutData, iSize * sizeof(T), aData, iSize * sizeof(T), ACL_MEMCPY_DEVICE_TO_DEVICE);
+        if (ret != ACL_SUCCESS)
+        {
+            printf("aclrtMemcpy failed. ERROR: %d\n", ret);
+        }
+        int64_t oSize = iSize;
+        aclTensor *tmpInTensor = nullptr;
+        aclTensor *tmpOutTensor = nullptr;
+        for (int i = 0; i < axesDim; i++)
+        {
+            tmpOutDim[axes[i]] = 1;
+            oSize = oSize / inputDim[axes[i]];
+            for (int j = ndim - 2; j >= 0; j--)
+            {
+                tmpOutStride[j] = tmpOutStride[j + 1] * tmpOutDim[j + 1];
+            }
+            tmpInTensor =
+                aclCreateTensor(tmpInDim.data(), tmpInDim.size(), dataType,
+                                tmpInStride.data(), 0, format,
+                                tmpInDim.data(), tmpInDim.size(), tmpInData);
+
+            tmpOutTensor =
+                aclCreateTensor(tmpOutDim.data(), tmpOutDim.size(), dataType,
+                                tmpOutStride.data(), 0, format,
+                                tmpOutDim.data(), tmpOutDim.size(), tmpOutData);
+            ret = aclnnProdDimGetWorkspaceSize(
+                tmpInTensor, int64_t(axes[i]), KeepDim, dataType, tmpOutTensor, &workspaceSize, &executor);
+            if (ret != ACL_SUCCESS)
+            {
+                printf("aclnnProdDimGetWorkspaceSize failed. ERROR: %d\n", ret);
+            }
+            void *workspaceAddr = nullptr;
+            if (workspaceSize > 0)
+            {
+                ret = aclrtMalloc(&workspaceAddr, workspaceSize, ACL_MEM_MALLOC_HUGE_FIRST);
+
+                if (ret != ACL_SUCCESS)
+                {
+                    printf("allocate workspace failed. ERROR: %d\n", ret);
+                }
+            }
+            ret = aclnnProdDim(workspaceAddr, workspaceSize, executor,
+                               stream);
+            if (ret != ACL_SUCCESS)
+            {
+                printf("aclnnProdDim failed. ERROR: %d\n", ret);
+            }
+            ret = aclrtSynchronizeStream(stream);
+
+            if (ret != ACL_SUCCESS)
+            {
+                printf("aclrtSynchronizeStream failed. ERROR: %d\n", ret);
+            }
+            ret = aclrtMemcpy(tmpInData, oSize * sizeof(T), tmpOutData, oSize * sizeof(T), ACL_MEMCPY_DEVICE_TO_DEVICE);
+            for (int j = ndim - 1; j >= 0; j--)
+            {
+                tmpInDim[j] = tmpOutDim[j];
+            }
+            for (int j = ndim - 2; j >= 0; j--)
+            {
+                tmpInStride[j] = tmpInStride[j + 1] * tmpInDim[j + 1];
+            }
+        }
+        ret = aclrtMemcpy(cData, oSize * sizeof(T), tmpOutData, oSize * sizeof(T), ACL_MEMCPY_DEVICE_TO_DEVICE);
+        aclDestroyTensor(tmpInTensor);
+        aclDestroyTensor(tmpOutTensor);
+        aclrtFree(tmpInData);
+        aclrtFree(tmpOutData);
+    }
     else if (mode == ReduceMode::Sum)
     {
         // 这个地方似乎不支持使用dataType

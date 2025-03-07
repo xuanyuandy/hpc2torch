@@ -62,7 +62,7 @@ def sumReduce(data, axes):
 def test(inputShape, axes, device):
     # 昇腾的min,prod只支持针对固定某一个维度规约
     operators = ["Max", "Mean", "Min", "Prod", "Sum"]
-    operator = operators[1]
+    operator = operators[3]
     byteSize = 2
     
     if byteSize == 2:

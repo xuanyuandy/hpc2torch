@@ -42,6 +42,8 @@ pool算子处理ndim=3的avgpool测试精度出错，昇腾平台目前缺少支
 
 昇腾clip不管input是f16还是f32，传入的min,max都必须是f32，否则结果报错
 
+昇腾matmul算子对于高维矩阵乘法不支持alpha, beta参数，并且对于大规模矩阵存在精度问题，怀疑是规模太大造成的误差累积
+
 ## 算子定义
 batchnorm算子有一个momentum参数，onnx默认值是0.9，torch默认是0.1
 

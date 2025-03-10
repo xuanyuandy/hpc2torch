@@ -16,29 +16,22 @@ void clipCnnlDevice(void const *aData, void *cData,
     {
         dataType = CNNL_DTYPE_FLOAT;
     }
+    cnnlTensorLayout_t layout = CNNL_LAYOUT_ARRAY;
     cnnlTensorDescriptor_t aDesc, cDesc;
     cnnlCreateTensorDescriptor(&aDesc);
     cnnlSetTensorDescriptor(
-        aDesc, CNNL_LAYOUT_ARRAY, dataType,
+        aDesc, layout, dataType,
         aDim, aShape);
     cnnlCreateTensorDescriptor(&cDesc);
     cnnlSetTensorDescriptor(
-        cDesc, CNNL_LAYOUT_ARRAY, dataType,
+        cDesc, layout, dataType,
         aDim, aShape);
     cnnlStatus_t stat;
-    if(sizeof(T) == 2){
-        uint16_t minV = static_cast<uint16_t>(minValue);
-        uint16_t maxV = static_cast<uint16_t>(maxValue);
-        stat =
-        cnnlClip_v2(handle, CNNL_POINTER_MODE_HOST, aDesc, aData, &minV, &maxV, cDesc, cData);
-    }
-    else if(sizeof(T) == 4){
-        stat =
+    stat =
         cnnlClip_v2(handle, CNNL_POINTER_MODE_HOST, aDesc, aData, &minValue, &maxValue, cDesc, cData);
-    }
     
     // cnnlStatus_t stat =
-    //     cnnlClip(handle, aDesc, aData, &minValue, &maxValue, cData);
+    //     cnnlClip(handle, aDesc, aData, &minValue, &maxValue, cData);//这个已经被替换了，不能使用
     if (stat != CNNL_STATUS_SUCCESS)
         return;
     CNRT_CHECK(cnrtQueueSync(queue));

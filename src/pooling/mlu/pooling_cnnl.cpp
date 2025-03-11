@@ -254,7 +254,6 @@ void poolingCnnl(void const *input, void *output,
         int *new_strides = (int *)malloc(2 * sizeof(int));
         int *new_dilations = (int *)malloc(2 * sizeof(int));
         int *new_x_shape = (int *)malloc(new_ndim * sizeof(int));
-        int *new_w_shape = (int *)malloc(new_ndim * sizeof(int));
         int *new_y_shape = (int *)malloc(new_ndim * sizeof(int));
         for (int i = 0; i < 2; i++)
         {

@@ -147,7 +147,7 @@ void poolingAclnnDevice(void *input, void *output,
         //     ret = aclnnAvgPool3d(workspaceAddr, workspaceSize, executor,
         //                          stream);
         // }
-        }
+    }
     else if (mode == PoolingMode::Max)
     {
         const int64_t autoPad = 0;
@@ -201,12 +201,47 @@ void poolingAclnn(void *input, void *output,
     {
         printf("Init acl failed. ERROR: %d\n", ret);
     }
-
-    poolingAclnnDevice<T>(input, output,
-                          windows, pads, strides, dilations,
-                          x_shape, y_shape,
-                          mode,
-                          ceil_mode, nDim, stream);
+    if (nDim == 3)
+    {
+        int new_ndim = 4;
+        int *new_windows = (int *)malloc(2 * sizeof(int));
+        int *new_pads = (int *)malloc(2 * sizeof(int));
+        int *new_strides = (int *)malloc(2 * sizeof(int));
+        int *new_dilations = (int *)malloc(2 * sizeof(int));
+        int *new_x_shape = (int *)malloc(new_ndim * sizeof(int));
+        int *new_y_shape = (int *)malloc(new_ndim * sizeof(int));
+        for (int i = 0; i < 2; i++)
+        {
+            new_windows[i] = (i < 1 ? windows[i] : 1);
+            new_pads[i] = (i < 1 ? pads[i] : 0);
+            new_strides[i] = (i < 1 ? strides[i] : 1);
+            new_dilations[i] = (i < 1 ? dilations[i] : 1);
+        }
+        for (int i = 0; i < new_ndim; i++)
+        {
+            new_x_shape[i] = (i < nDim ? x_shape[i] : 1);
+            new_y_shape[i] = (i < nDim ? y_shape[i] : 1);
+        }
+        poolingAclnnDevice<T>(input, output,
+                              new_windows, new_pads, new_strides, new_dilations,
+                              new_x_shape, new_y_shape,
+                              mode,
+                              ceil_mode, new_ndim, stream);
+        free(new_windows);
+        free(new_pads);
+        free(new_strides);
+        free(new_dilations);
+        free(new_x_shape);
+        free(new_y_shape);
+    }
+    else
+    {
+        poolingAclnnDevice<T>(input, output,
+                              windows, pads, strides, dilations,
+                              x_shape, y_shape,
+                              mode,
+                              ceil_mode, nDim, stream);
+    }
     Finalize(deviceId, stream);
 }
 extern "C" void MaxPooling_aclnn(void *input, void *output,

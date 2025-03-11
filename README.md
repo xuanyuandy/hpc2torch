@@ -34,7 +34,7 @@ layernorm算子cnnl不支持axis=0，手写算子处理axis=0,f16时必须控制
 ## 昇腾平台
 conv算子面对f32，ndim=5测试报错，但是f16，ndim=5精度正常，原因是昇腾机器torch.conv3d不支持f32，convTranspose有类似问题
 
-pool算子处理ndim=3的avgpool测试精度出错，昇腾平台目前缺少支持ndim=5的maxPool库函数
+pool算子处理ndim=3的avgpool测试精度出错，对于三维向量必须手动填充为四维向量才能处理，昇腾平台目前缺少支持ndim=5的maxPool库函数
 
 昇腾调库softmax处理f16数据精度不足
 

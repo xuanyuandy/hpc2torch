@@ -1,0 +1,11 @@
+# Cmake cache
+build/
+
+
+# Python
+__pycache__/
+
+# Log
+*.log
+
+

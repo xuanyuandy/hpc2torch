@@ -1,29 +1,14 @@
 #include "bang.h"
 #include "cnrt.h"
-#include <type_traits>
+#include "mlu/common_mlu.h"
 
 const int NRAM_MAX_SIZE = 1024 * 256;
 __nram__ char nram_buffer[NRAM_MAX_SIZE];
 
 const int SRC_MAX_SIZE = 1024 * 64;//尽量取大一些
 
-template<typename T>
-inline __mlu_func__ void ComputeInternal(T *tensor_nram, T *temp_nram, int num_align) {
-    int length = 128 / sizeof(T);
-    __bang_sumpool(
-        temp_nram,
-        tensor_nram,
-        /*channel*/ length,
-        /*height*/ 1,
-        /*width*/ num_align / length,
-        /*kernel_height*/ 1,
-        /*kernel_width*/ num_align / length,
-        /*stride_height*/ 1,
-        /*stride_width*/ 1);
-    __bang_reduce_sum(temp_nram, temp_nram, length);//这个函数把长度为num_align的向量做了一个norm求和
-}//temp_nram是一个字节数为128的数组
 
-__mlu_global__ void ReduceRMSNormF(half *destination, half const *source, float const *weight, int *shape, int *stride_y, int *stride_x, float eps, int ndim, int dimS){
+__mlu_global__ void RMSNormTF(half *destination, half const *source, float const *weight, int *shape, int *stride_y, int *stride_x, float eps, int ndim, int dimS){
     int othersize = 1;
     for(int i = 0; i < ndim - 1; i++){
         othersize *= shape[i];
@@ -117,13 +102,12 @@ __mlu_global__ void ReduceRMSNormF(half *destination, half const *source, float 
         }
     }
     else{
-        char *nram_buffer1 = nram_buffer + (2 * dimsize + 2 * wSize + dimS) * sizeof(half);
-        half *src = (half *)nram_buffer;//[dimsize]
-        half *wet = src + dimsize;//[dimsize]
-        half *destSumFinal = wet + dimsize;//[wSize]
+        char *nram_buffer1 = nram_buffer + (wSize + 3 * dimS) * sizeof(half);
+        half *src = (half *)nram_buffer;//[dimS]
+        half *wet = src + dimS;//[dimS]
+        half *destSumFinal = wet + dimS;//[wSize]
         half *destSum = destSumFinal + wSize;//[dimS]
-        half *srcTmp = destSum + dimS;
-        __bang_write_zero(srcTmp, wSize);
+        
         float *wetTmp = (float *)nram_buffer1;
 
 
@@ -131,6 +115,7 @@ __mlu_global__ void ReduceRMSNormF(half *destination, half const *source, float 
 
         for(int i = indStart; i < indStart + step; i++){
             __bang_write_zero(destSum, dimS);
+            __bang_write_zero(src, dimS);
             __bang_write_zero(destSumFinal, wSize);
             int inds = 0;
             int indd = 0;
@@ -142,14 +127,7 @@ __mlu_global__ void ReduceRMSNormF(half *destination, half const *source, float 
             }
             __memcpy(src, source + inds, dimsize * sizeof(half), GDRAM2NRAM);
             __bang_mul(destSum, src, src, dimsize);//src = src * src
-            if(dimS >= wSize){
-                
-                ComputeInternal<half>(destSumFinal, destSumFinal, dimS);//dimS必须是128/sizeof(half)的倍数
-            }
-            else{
-                __memcpy(srcTmp, destSum, dimsize * sizeof(half), NRAM2NRAM);
-                __bang_reduce_sum(destSumFinal, srcTmp, wSize);
-            }
+            ComputeInternal<half>(destSum, destSumFinal, dimS);//dimS必须是128/sizeof(half)的倍数
             destSumFinal[0] /= dimsize;
             destSumFinal[0] += eps;
             destSumFinal[0] = pow(destSumFinal[0], 0.5);
@@ -164,7 +142,7 @@ __mlu_global__ void ReduceRMSNormF(half *destination, half const *source, float 
 }
 
 template<typename T>
-__mlu_global__ void ReduceRMSNorm(T *destination, T const *source, T const *weight, int *shape, int *stride_y, int *stride_x, float eps, int ndim, int dimS){
+__mlu_global__ void RMSNormT(T *destination, T const *source, T const *weight, int *shape, int *stride_y, int *stride_x, float eps, int ndim, int dimS){
     int othersize = 1;
     for(int i = 0; i < ndim - 1; i++){
         othersize *= shape[i];
@@ -255,17 +233,17 @@ __mlu_global__ void ReduceRMSNorm(T *destination, T const *source, T const *weig
     }
     else{
 
-        T *src = (T *)nram_buffer;//[dimsize]
-        T *wet = src + dimsize;//[dimsize]
-        T *destSumFinal = wet + dimsize;//[wSize]
+        T *src = (T *)nram_buffer;//[dimS]
+        T *wet = src + dimS;//[dimS]
+        T *destSumFinal = wet + dimS;//[wSize]
         T *destSum = destSumFinal + wSize;//[dimS]
-        T *srcTmp = destSum + dimS;//[wSize]
 
 
         //int segNum = dimS / wSize;
 
         for(int i = indStart; i < indStart + step; i++){
             __bang_write_zero(destSum, dimS);
+            __bang_write_zero(src, dimS);
             __bang_write_zero(destSumFinal, wSize);
             int inds = 0;
             int indd = 0;
@@ -277,15 +255,7 @@ __mlu_global__ void ReduceRMSNorm(T *destination, T const *source, T const *weig
             }
             __memcpy(src, source + inds, dimsize * sizeof(T), GDRAM2NRAM);
             __bang_mul(destSum, src, src, dimsize);//src = src * src
-            if(dimS >= wSize){
-                
-                ComputeInternal<T>(destSum, destSumFinal, dimS);
-            }
-            else{
-                __memcpy(srcTmp, destSum, dimsize * sizeof(T), NRAM2NRAM);
-                __bang_reduce_sum(destSumFinal, srcTmp, wSize);
-
-            }
+            ComputeInternal<T>(destSum, destSumFinal, dimS);
             destSumFinal[0] /= dimsize;
             destSumFinal[0] += eps;
             destSumFinal[0] = pow(destSumFinal[0], 0.5);
@@ -300,7 +270,7 @@ __mlu_global__ void ReduceRMSNorm(T *destination, T const *source, T const *weig
 
 
 template<typename T, typename Tw>
-void ReduceRMSNormUnion(cnrtQueue_t queue, void *y, void const *x, void const *w, int *shape, int *stride_y, int *stride_x, float eps, int ndim){
+void RMSNormTUnion(cnrtQueue_t queue, void *y, void const *x, void const *w, int *shape, int *stride_y, int *stride_x, float eps, int ndim){
     cnrtDim3_t k_dim;
     cnrtFunctionType_t k_type;
 
@@ -316,6 +286,11 @@ void ReduceRMSNormUnion(cnrtQueue_t queue, void *y, void const *x, void const *w
     } else {
         dimS = pow(2, floor(mi) + 1);
     }
+    int wSize = 128 / sizeof(T);
+    if (dimS < wSize){
+        dimS = wSize;
+    }
+    
     auto y_ = reinterpret_cast<T *>(y);
     auto x_ = reinterpret_cast<T const *>(x);
     auto w_ = reinterpret_cast<Tw const *>(w);
@@ -330,33 +305,34 @@ void ReduceRMSNormUnion(cnrtQueue_t queue, void *y, void const *x, void const *w
     CNRT_CHECK(cnrtMemcpy(mlu_stride_y, stride_y, ndim * sizeof(int), cnrtMemcpyHostToDev));
 
     if constexpr (std::is_same<T, half>::value && std::is_same<Tw, float>::value){//不能使用sizeof判断
-        ReduceRMSNormF<<<k_dim, k_type, queue>>>(y_, x_, w_, mlu_shape, mlu_stride_y, mlu_stride_x, eps, ndim, dimS);
+        RMSNormTF<<<k_dim, k_type, queue>>>(y_, x_, w_, mlu_shape, mlu_stride_y, mlu_stride_x, eps, ndim, dimS);
     }
     else{
-        ReduceRMSNorm<T><<<k_dim, k_type, queue>>>(y_, x_, w_, mlu_shape, mlu_stride_y, mlu_stride_x, eps, ndim, dimS);
+        RMSNormT<T><<<k_dim, k_type, queue>>>(y_, x_, w_, mlu_shape, mlu_stride_y, mlu_stride_x, eps, ndim, dimS);
     }
     
     cnrtQueueSync(queue);
     cnrtFree(tmpDevice);
 }
-extern "C" void ReduceRMSNorm_bang(void *y, void const *x, void const *w,
+extern "C" void RMSNormT_bang(void *y, void const *x, void const *w,
                              int *shape, int *stride_y, int *stride_x, float eps, int ndim, int byteT, int byteTw){
     cnrtQueue_t queue;
     CNRT_CHECK(cnrtSetDevice(0));
     CNRT_CHECK(cnrtQueueCreate(&queue));
     
     if(byteT == 2 && byteTw == 4){
-        ReduceRMSNormUnion<half, float>(queue, y, x, w, shape, stride_y, stride_x, eps, ndim);
+        RMSNormTUnion<half, float>(queue, y, x, w, shape, stride_y, stride_x, eps, ndim);
     }
     
     else if(byteT == 4 && byteTw == 4){
-        ReduceRMSNormUnion<float, float>(queue, y, x, w, shape, stride_y, stride_x, eps, ndim);
+        RMSNormTUnion<float, float>(queue, y, x, w, shape, stride_y, stride_x, eps, ndim);
     }
     else if(byteT == 2 && byteTw == 2){
-        ReduceRMSNormUnion<half, half>(queue, y, x, w, shape, stride_y, stride_x, eps, ndim);
+        RMSNormTUnion<half, half>(queue, y, x, w, shape, stride_y, stride_x, eps, ndim);
     }
     CNRT_CHECK(cnrtQueueDestroy(queue));
 
 }
+
 
 

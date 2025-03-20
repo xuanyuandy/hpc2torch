@@ -18,9 +18,14 @@ def causal_softmax(x):
     masked = torch.where(mask == 1, -torch.inf, y.to(torch.float32))
     return torch.nn.functional.softmax(masked, dim=-1).to(type)
 
-def test(test_shape, test_dtype, device):
+def test(test_shape, device):
+    byteSize = 2
+    if byteSize == 2:
+        test_dtype = torch.float16
+    elif byteSize == 4:
+        test_dtype = torch.float32
     print(
-        f"Testing Layernorm on {device} with test_shape:{test_shape}, dtype:{test_dtype}"
+        f"Testing Causal softmax on {device} with test_shape:{test_shape}, dtype:{test_dtype}"
     )
     ndim = len(test_shape)
     
@@ -40,55 +45,30 @@ def test(test_shape, test_dtype, device):
     for i in range(ndim - 1):
         othersize *= test_shape[i]
     
-    if test_dtype == torch.float32:
-        if device == "mlu":
-            torch_causal_softmax_time = performance.BangProfile((causal_softmax, (input, ))) #虽然迭代20次，但是不会修改input取值
-            
-            lib.causal_softmax_bang_f32.argtypes = [
-                ctypes.POINTER(ctypes.c_void_p),
-                ctypes.POINTER(ctypes.c_int),
-                ctypes.POINTER(ctypes.c_int),
-                ctypes.c_int,
-                ctypes.c_int,
-                ctypes.c_int,
-                ctypes.c_int
-            ]
-            custom_causal_softmax_time = \
-            performance.BangProfile((lib.causal_softmax_bang_f32, (output_ptr, stride_ptr, shape, othersize, dimsize, mask, ndim)))
-            '''
-            lib.causal_softmax_cnnl_f32.argtypes = [
-                ctypes.POINTER(ctypes.c_void_p),
-                ctypes.POINTER(ctypes.c_int),
-                ctypes.c_int
-            ]
-            custom_causal_softmax_time = \
-            performance.BangProfile((lib.causal_softmax_cnnl_f32, (output_ptr, shape, ndim)))
-            '''
-            
-    if test_dtype == torch.float16:
-        if device == "mlu":
-            torch_causal_softmax_time = performance.BangProfile((causal_softmax, (input, )))  # 以毫秒为单位
-            
-            lib.causal_softmax_bang_f16.argtypes = [
-                ctypes.POINTER(ctypes.c_void_p),
-                ctypes.POINTER(ctypes.c_int),
-                ctypes.POINTER(ctypes.c_int),
-                ctypes.c_int,
-                ctypes.c_int,
-                ctypes.c_int,
-                ctypes.c_int
-            ]
-            custom_causal_softmax_time = \
-            performance.BangProfile((lib.causal_softmax_bang_f16, (output_ptr, stride_ptr, shape, othersize, dimsize, mask, ndim)))
-            '''
-            lib.causal_softmax_cnnl_f16.argtypes = [
-                ctypes.POINTER(ctypes.c_void_p),
-                ctypes.POINTER(ctypes.c_int),
-                ctypes.c_int
-            ]
-            custom_causal_softmax_time = \
-            performance.BangProfile((lib.causal_softmax_cnnl_f16, (output_ptr, shape, ndim)))
-            '''
+    if device == "mlu":
+        torch_causal_softmax_time = performance.BangProfile((causal_softmax, (input, ))) #虽然迭代20次，但是不会修改input取值
+        
+        lib.causal_softmax_bang.argtypes = [
+            ctypes.POINTER(ctypes.c_void_p),
+            ctypes.POINTER(ctypes.c_int),
+            ctypes.POINTER(ctypes.c_int),
+            ctypes.c_int,
+            ctypes.c_int,
+            ctypes.c_int,
+            ctypes.c_int,
+            ctypes.c_int
+        ]
+        custom_causal_softmax_time = \
+        performance.BangProfile((lib.causal_softmax_bang, (output_ptr, stride_ptr, shape, othersize, dimsize, mask, ndim, byteSize)))
+        '''
+        lib.causal_softmax_cnnl_f32.argtypes = [
+            ctypes.POINTER(ctypes.c_void_p),
+            ctypes.POINTER(ctypes.c_int),
+            ctypes.c_int
+        ]
+        custom_causal_softmax_time = \
+        performance.BangProfile((lib.causal_softmax_cnnl_f32, (output_ptr, shape, ndim)))
+        '''
     performance.logBenchmark(torch_causal_softmax_time, custom_causal_softmax_time)
     for i in range(40):#performance里面对output迭代了40次，因此这里需要同样迭代那么多次才能是正确结果
         input = causal_softmax(input)
@@ -112,22 +92,15 @@ parser.add_argument('--device', choices=['cpu', 'cuda', 'mlu'], required=True, h
 args = parser.parse_args()    
 
 test_cases = [
-        
-
-        ((32, 20, 512), torch.float32, 'mlu'),
-        ((32, 5, 5), torch.float32, 'mlu'),
-
-        ((32, 20, 512), torch.float16, 'mlu'),
-        ((32, 5, 5), torch.float16, 'mlu'),
-         
+        ((32, 20, 128, 512)),
+        ((32, 20, 512)),
+        ((32, 5, 5)),
+        ((32, 128)),
+        ((32, 4096)),
 ]
-filtered_test_cases = [
-    (test_shape, test_dtype, device)
-    for test_shape, test_dtype, device in test_cases
-    if device == args.device
-]
+
 if args.device == 'mlu':
     import torch_mlu
 # 执行过滤后的测试用例
-for test_shape, test_dtype, device in filtered_test_cases:
-    test(test_shape, test_dtype, device)
+for test_shape in test_cases:
+    test(test_shape, args.device)

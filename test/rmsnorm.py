@@ -48,7 +48,6 @@ def test(test_shape, w_shape, dtype, w_dtype, torch_device):
     
     if torch_device == "mlu":
         torch_RMSNorm_time = performance.BangProfile((rms_norm, (x, w, eps)))  # 以毫秒为单位
-        '''
         lib.RMSNorm_bang.argtypes = [
             ctypes.POINTER(ctypes.c_void_p),
             ctypes.POINTER(ctypes.c_void_p),
@@ -63,21 +62,7 @@ def test(test_shape, w_shape, dtype, w_dtype, torch_device):
         ]
         custom_RMSNorm_time = \
         performance.BangProfile((lib.RMSNorm_bang, (output_ptr, input_ptr, scale_ptr, shapeData, strideYData, strideXData, eps, ndim, byteT, byteTw)))
-        '''
-        lib.RMSNormT_bang.argtypes = [
-            ctypes.POINTER(ctypes.c_void_p),
-            ctypes.POINTER(ctypes.c_void_p),
-            ctypes.POINTER(ctypes.c_void_p),
-            ctypes.POINTER(ctypes.c_int),
-            ctypes.POINTER(ctypes.c_int),
-            ctypes.POINTER(ctypes.c_int),
-            ctypes.c_float,
-            ctypes.c_int,
-            ctypes.c_int,
-            ctypes.c_int
-        ]
-        custom_RMSNorm_time = \
-        performance.BangProfile((lib.RMSNormT_bang, (output_ptr, input_ptr, scale_ptr, shapeData, strideYData, strideXData, eps, ndim, byteT, byteTw)))
+        
     performance.logBenchmark(torch_RMSNorm_time, custom_RMSNorm_time)
 
     # 将结果转换回 PyTorch 张量以进行比较

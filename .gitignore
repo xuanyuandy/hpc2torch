@@ -8,4 +8,6 @@ __pycache__/
 # Log
 *.log
 
+# Bash
 
+run.sh

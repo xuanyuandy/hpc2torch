@@ -1,0 +1,108 @@
+#include "kunlun/binary_kunlun.h"
+#include <cmath>
+#include <iostream>
+#include <stddef.h>
+
+struct SwiGLUOp {
+private:
+    template <typename T>
+    __device__ T sigmoid(const T &x) const {
+        return 1 / (1 + exp(-x));
+    }
+
+public:
+    template <typename T>
+    __device__ T operator()(const T &up, const T &gate) const {
+        return gate * sigmoid(gate) * up;
+    }
+};
+
+template <typename T>
+void swigluKunlunDevice(kunlun_size_t c_data_size, kunlun_size_t ndim,
+                bool contiguous, bool broadcasted, 
+                const kunlun_size_t *c_shape, const kunlun_ptrdiff_t *c_strides, 
+                const kunlun_size_t *a_shape, const kunlun_ptrdiff_t *a_strides,
+                const kunlun_size_t *b_shape, const kunlun_ptrdiff_t *b_strides, 
+                void *c, const void *a, const void *b, 
+                XPUStream stream){
+    launch_calculate<T, SwiGLUOp>(c_data_size,
+                      ndim,
+                      contiguous,
+                      broadcasted, c_shape, c_strides, a_shape, a_strides,
+                      b_shape, b_strides, (T *)c, (T *)a, (T *)b, stream);
+}
+
+template <typename T>
+void swigluKunlun(kunlun_size_t c_data_size, kunlun_size_t ndim,
+                bool contiguous, bool broadcasted, 
+                const kunlun_size_t *c_shape, const kunlun_ptrdiff_t *c_strides, 
+                const kunlun_size_t *a_shape, const kunlun_ptrdiff_t *a_strides,
+                const kunlun_size_t *b_shape, const kunlun_ptrdiff_t *b_strides, 
+                void *c, const void *a, const void *b){
+             
+    XPUStream stream;
+    int err = xpu_stream_create(&stream);
+    swigluKunlunDevice<T>(c_data_size,
+                      ndim,
+                      contiguous,
+                      broadcasted, c_shape, c_strides, a_shape, a_strides,
+                      b_shape, b_strides, (T *)c, (T *)a, (T *)b, stream);
+                     
+}
+
+extern "C" void swiglu_kunlun(kunlun_size_t c_data_size, kunlun_size_t ndim,
+                kunlun_size_t aDim, kunlun_size_t bDim,
+                bool contiguous, bool broadcasted, 
+                const kunlun_size_t *c_shape, const kunlun_ptrdiff_t *c_strides, 
+                const kunlun_size_t *a_shape, const kunlun_ptrdiff_t *a_strides,
+                const kunlun_size_t *b_shape, const kunlun_ptrdiff_t *b_strides, 
+                void *c, const void *a, const void *b, int byteSize)
+{
+    
+    if (broadcasted){
+        char *tmp = (char *)malloc(2 * ndim * (sizeof(kunlun_size_t) + sizeof(kunlun_ptrdiff_t)));
+        char *tmp_stride = tmp + 2 * ndim * sizeof(kunlun_size_t);
+        kunlun_size_t *new_a_shape = (kunlun_size_t *)tmp;
+        kunlun_size_t *new_b_shape = new_a_shape + ndim;
+        kunlun_ptrdiff_t *new_a_strides = (kunlun_ptrdiff_t *)tmp_stride;
+        kunlun_ptrdiff_t *new_b_strides = new_a_strides + ndim;
+        broadcast_shapes(a_shape, aDim,
+                             b_shape, bDim,
+                             c_shape, ndim,
+                             a_strides, b_strides,
+                             new_a_strides, new_b_strides,
+                             new_a_shape, new_b_shape);
+        /***                   
+        for(int i = 0; i < ndim; i++){
+            printf("%d ", new_b_shape[i]);
+        }
+        printf("\n");
+        for(int i = 0; i < ndim; i++){
+            printf("%d ", new_b_strides[i]);
+        }
+        printf("\n");
+        printf("-----------\n");
+        ***/
+        if (byteSize == 4)
+        {
+            swigluKunlun<float>(c_data_size,
+                        ndim,
+                        contiguous,
+                        false, c_shape, c_strides, (const kunlun_size_t*)new_a_shape, (const kunlun_ptrdiff_t*)new_a_strides,
+                        (const kunlun_size_t*)new_b_shape, (const kunlun_ptrdiff_t*)new_b_strides, c, a, b);
+        }
+        free(tmp);
+    }
+    else{
+        
+        if (byteSize == 4){
+            swigluKunlun<float>(c_data_size,
+                        ndim,
+                        contiguous,
+                        broadcasted, c_shape, c_strides, a_shape, a_strides,
+                        b_shape, b_strides, c, a, b);
+        }
+        
+    }
+    
+}

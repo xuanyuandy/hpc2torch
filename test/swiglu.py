@@ -93,11 +93,8 @@ def test(c_shape, a_shape, b_shape, device):
         performance.logBenchmark(torch_swiglu_time, custom_swiglu_time)
     # 将结果转换回 PyTorch 张量以进行比较
     tmpa = swiglu(a, b).to('cpu').numpy().flatten()
-    # print(swiglu(a, b) - c)
-    # print(swiglu(a, b))
-    # print(c)
     tmpb = c.to('cpu').numpy().flatten()
-    # print(tmpa, tmpb, tmpa - tmpb)
+    
     atol = max(abs(tmpa - tmpb))
 
     rtol = atol / (max(abs(tmpb)) + 1e-8)
@@ -112,14 +109,14 @@ args = parser.parse_args()
 
 test_cases = [
         # c_shape, a_shape, b_shape
-        # ((1, 3), (1,), (1, 3)),
-        # ((1, 3), (1, 3), (1, 3)),
+        ((1, 3), (1,), (1, 3)),
+        ((1, 3), (1, 3), (1, 3)),
         ((2, 4, 3), (2, 1, 3), (4, 3)),
-        # ((2, 3, 4, 5), (2, 3, 4, 5), (5,)),
+        ((2, 3, 4, 5), (2, 3, 4, 5), (5,)),
 
-        # ((3, 2, 4, 5), (4, 5), (3, 2, 1, 1)),
-        # ((3, 20, 33), (3, 20, 33), (3, 20, 33)),
-        # ((32, 3, 112, 112), (32, 3, 112, 112), (32, 3, 112, 112)),
+        ((3, 2, 4, 5), (4, 5), (3, 2, 1, 1)),
+        ((3, 20, 33), (3, 20, 33), (3, 20, 33)),
+        ((32, 3, 112, 112), (32, 3, 112, 112), (32, 3, 112, 112)),
 
         
 ]

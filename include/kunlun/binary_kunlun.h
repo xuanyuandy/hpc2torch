@@ -148,9 +148,7 @@ __global__ void calculate(kunlun_size_t c_data_size,
                 int a_index = broadcasted ? indexToReducedOffset(i_index, ndim, xpu_c_strides, xpu_a_strides) : indexToOffset(i_index, ndim, xpu_a_shape, xpu_a_strides);
                 int b_index = broadcasted ? indexToReducedOffset(i_index, ndim, xpu_c_strides, xpu_b_strides) : indexToOffset(i_index, ndim, xpu_b_shape, xpu_b_strides);
                 int c_index = indexToOffset(i_index, ndim, xpu_c_shape, xpu_c_strides);
-                // int c_index = 0;
-                // int b_index = 0;
-                // printf("%d, %d, %d\n", a_index, b_index, c_index);
+
                 GM2LM(a + a_index, a_local + i, 1 * sizeof(Tdata));
                 GM2LM(b + b_index, b_local + i, 1 * sizeof(Tdata));
                 c_local[i] = BinaryOp{}(a_local[i], b_local[i], std::forward<Args>(args)...);

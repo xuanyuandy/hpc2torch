@@ -88,7 +88,7 @@ extern "C" void swiglu_kunlun(kunlun_size_t c_data_size, kunlun_size_t ndim,
             swigluKunlun<float>(c_data_size,
                         ndim,
                         contiguous,
-                        false, c_shape, c_strides, (const kunlun_size_t*)new_a_shape, (const kunlun_ptrdiff_t*)new_a_strides,
+                        broadcasted, c_shape, c_strides, (const kunlun_size_t*)new_a_shape, (const kunlun_ptrdiff_t*)new_a_strides,
                         (const kunlun_size_t*)new_b_shape, (const kunlun_ptrdiff_t*)new_b_strides, c, a, b);
         }
         free(tmp);

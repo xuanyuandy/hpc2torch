@@ -171,9 +171,6 @@ elseif(USE_KUNLUN)
 
     # 设置编译 .xpu 文件的规则
     set(KUNLUN_XPU_OBJECTS "")
-    file(GLOB KUNLUN_SOURCE_FILES "src/**/kunlun/*.xpu")
-    file(GLOB KUNLUN_INCLUDE_SOURCE_FILES "include/kunlun/**.xpu")
-    list(APPEND KUNLUN_SOURCE_FILES ${KUNLUN_INCLUDE_SOURCE_FILES})
 
     # 设置中间文件输出目录
     set(KUNLUN_OBJ_DIR "${CMAKE_BINARY_DIR}/kunlun_objs")

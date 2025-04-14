@@ -72,17 +72,6 @@ extern "C" void swiglu_kunlun(kunlun_size_t c_data_size, kunlun_size_t ndim,
                              a_strides, b_strides,
                              new_a_strides, new_b_strides,
                              new_a_shape, new_b_shape);
-        /***                   
-        for(int i = 0; i < ndim; i++){
-            printf("%d ", new_b_shape[i]);
-        }
-        printf("\n");
-        for(int i = 0; i < ndim; i++){
-            printf("%d ", new_b_strides[i]);
-        }
-        printf("\n");
-        printf("-----------\n");
-        ***/
         if (byteSize == 4)
         {
             swigluKunlun<float>(c_data_size,

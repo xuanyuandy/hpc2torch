@@ -57,12 +57,12 @@ __global__ void ropeKunlunDevice(T *destination, const T *source,
         for(int r = 0; r < repeat + (remain_dh > 0 ? 1 : 0); r++){
             int read_len = (r < repeat ? buf_size : remain_dh);
             int dk = read_len / 2;
-            int start_d = ind_s + r * buf_size;
+            int start_d = ind_d + r * buf_size;
             int start_s = ind_s + r * buf_size;
-
+            int sin_cos_index = index + r * buf_size / 2;
             GM2LM(source + start_s, x_local, read_len * sizeof(T));
-            GM2LM(sin_table + index, sin_local, dk * sizeof(float));
-            GM2LM(cos_table + index, cos_local, dk * sizeof(float));
+            GM2LM(sin_table + sin_cos_index, sin_local, dk * sizeof(float));
+            GM2LM(cos_table + sin_cos_index, cos_local, dk * sizeof(float));
             for(int k = 0; k < dk; k++){
                 if constexpr (std::is_same<T, float>::value) {
                     y_local[2 * k] = x_local[2 * k] * cos_local[k] - x_local[2 * k + 1] * sin_local[k];
@@ -93,17 +93,13 @@ void ropeKunlun(void *destination, const void *source,
     assert(ret == 0);
     ret = xpu_memcpy(xpu_y_strides, y_strides, ndim * sizeof(kunlun_ptrdiff_t), XPU_HOST_TO_DEVICE);
     assert(ret == 0);
-
-    kunlun_size_t *cpu_pos = (kunlun_size_t *)malloc(ndim * sizeof(kunlun_size_t));
-    ret = xpu_memcpy(cpu_pos, (kunlun_size_t *)pos_ids, ndim * sizeof(kunlun_size_t), XPU_DEVICE_TO_HOST);
-    
-    ropeKunlunDevice<T><<<4, 1, stream>>>((T *)destination, (T *)source, 
+    ropeKunlunDevice<T><<<8, 64, stream>>>((T *)destination, (T *)source, 
                 (kunlun_size_t *)pos_ids, (float *)sin_table, (float *)cos_table, 
-                nt,  nh, dh,
-                xpu_x_strides, xpu_y_strides, stream);
+                nt, nh, dh,
+                xpu_x_strides, xpu_y_strides, stream);           
     xpu_wait();
-    xpu_free(workspace);            
-                     
+    xpu_free(workspace);   
+    
 }
 extern "C" void rope_kunlun(void *destination, const void *source, 
                 const void *pos_ids, const void *sin_table, const void *cos_table, 
@@ -113,7 +109,7 @@ extern "C" void rope_kunlun(void *destination, const void *source,
     if (byteSize == 4){
         ropeKunlun<float>(destination, source, 
                 pos_ids, sin_table, cos_table, 
-                nt,  nh, dh,
+                nt, nh, dh,
                 x_strides, y_strides);
     }    
 }

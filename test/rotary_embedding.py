@@ -127,11 +127,13 @@ def test(test_shape, device):
             performance.KunlunProfile((lib.rope_kunlun, (output_ptr, t_ptr, pos_ptr, sin_ptr, cos_ptr, 
             nt, nh, dimsize, x_strides, y_strides, byteSize)))
     performance.logBenchmark(torch_RoPE_time, custom_RoPE_time)
-    
+
     tmpa = output.to("cpu").detach().numpy().flatten()
     
     tmpb = rotary_embedding(t, sin_table, cos_table, torch_device).to('cpu').detach().numpy().flatten()
-    
+    # if dimsize == 64:
+    #     print(output)
+    #     print(rotary_embedding(t, sin_table, cos_table, torch_device))
     atol = max(abs(tmpa - tmpb))
 
     rtol = atol / max(abs(tmpb) + 1e-8)
@@ -147,9 +149,10 @@ args = parser.parse_args()
 
 test_cases = [
         ((1, 32, 128)),
-        ((1, 32, 64)),
+        ((1, 32, 64)), #不知道为什么这个例子在第二个测试会报错
         
         ((4, 1, 32)),
+        ((4, 1, 2050)),
         ((3, 32, 128)),
     ]
 

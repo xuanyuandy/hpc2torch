@@ -4,7 +4,9 @@ const int NRAM_MAX_SIZE = 1024 * 256;
 __nram__ char nram_buffer[NRAM_MAX_SIZE];
 
 template <typename T>
-__mlu_global__ void RoPE(T *destination, uint32_t const *pos_ids, float const *sin_table, float const *cos_table, int stride_0, int stride_1, int nt, int nh, int dimsize) {//axis=-1
+__mlu_global__ void RoPE(T *destination, const T *source, 
+                        const uint32_t *pos_ids, const float *sin_table, const float *cos_table, 
+                        int nt, int nh, int dh, int *x_strides, int *y_strides) {//axis=-1
     const int SRC_MAX_SIZE = NRAM_MAX_SIZE / 32;
     const int maxNum = SRC_MAX_SIZE/sizeof(float);
     
@@ -17,374 +19,119 @@ __mlu_global__ void RoPE(T *destination, uint32_t const *pos_ids, float const *s
     int srcStrideW = 1 * sizeof(T);
     int destStrideW = 2 * sizeof(T);
 
-    int segsize_table = sizeof(float);
-    int srcStrideL_table = 2 * sizeof(float);
-    int destStrideL_table = 1 * sizeof(float);
-    
+   
+    int x_strides_0 = x_strides[0];
+    int x_strides_1 = x_strides[1];
+    int y_strides_0 = y_strides[0];
+    int y_strides_1 = y_strides[1];
 
     int remainT = othersize % taskDim;
     int stepEasy = (othersize - remainT) / taskDim;
     int stepHard = stepEasy + 1;
     int step = (taskId < remainT ? stepHard : stepEasy);
     int indStart = (taskId < remainT ? taskId * stepHard : (taskId - remainT) * stepEasy + remainT * stepHard);
-    
+
+    char *nram_buffer1;
+    uint32_t *srcP;
     if(nt < maxNum){
-        char *nram_buffer1 = nram_buffer + nt * sizeof(uint32_t);
-        uint32_t *srcP = (uint32_t *)nram_buffer;//[nt]
-
+        nram_buffer1 = nram_buffer + nt * sizeof(uint32_t);
+        srcP = (uint32_t *)nram_buffer;//[nt]
         __memcpy(srcP, pos_ids, nt * sizeof(uint32_t), GDRAM2NRAM);
-        
-        if(dimsize >= maxNum){
-            int dSize = 2 * maxNum;
-            char *nram_buffer2 = nram_buffer1 + (2 * dSize + 14 * maxNum) * sizeof(float);
-            float *srcSin = (float *)nram_buffer1;//[dSize]
-            float *srcCos = srcSin + dSize;//[dSize]
-            float *sin0 = srcCos + dSize;//[3 * maxNum]
-            float *cos0 = sin0 + 3 * maxNum;//[3 * maxNum]
-            float *sin1 = cos0 + 3 * maxNum;//[3 * maxNum],需要多申请内存，方便后面数据移动
-            float *cos1 = sin1 + 3 * maxNum;//[3 * maxNum],需要多申请内存，方便后面数据移动
-            float *tmpa = cos1 + 3 * maxNum;//[maxNum]
-            float *tmpb = tmpa + maxNum;//[maxNum]
-            
-
-            T *srca = (T *)nram_buffer2;//[maxNum]
-            T *srcb = srca + maxNum;//[3 * maxNum]
-            T *src = srcb + 3 * maxNum;//[dSize]
-
-
-            int segnum = 2 * maxNum;
-            
-            int remain = dimsize % dSize;
-            int repeat = (dimsize - remain) / dSize;
-            
-            for(int i = indStart; i < indStart + step; i++){
-                int indd = 0;
-                int indi = i;
-                indd += (indi % nh) * stride_1;
-                indi /= nh;
-                indd += (indi % nt) * stride_0;
-                int index = srcP[(indi % nt)] * dimsize;
-                for(int s = 0; s < repeat; s++){
-                    __memcpy(srcSin, sin_table + index + s * dSize, dSize * sizeof(float), GDRAM2NRAM);
-                    __memcpy(sin0, srcSin, segsize_table, NRAM2NRAM, destStrideL_table, srcStrideL_table, segnum); 
-                    __memcpy(sin1, srcSin + 1, segsize_table, NRAM2NRAM, destStrideL_table, srcStrideL_table, segnum);   
-
-                    __memcpy(srcCos, cos_table + index + s * dSize, dSize * sizeof(float), GDRAM2NRAM);              
-                    __memcpy(cos0, srcCos, segsize_table, NRAM2NRAM, destStrideL_table, srcStrideL_table, segnum); 
-                    __memcpy(cos1, srcCos + 1, segsize_table, NRAM2NRAM, destStrideL_table, srcStrideL_table, segnum);
-
-                    __memcpy(src, destination + indd + s * dSize, dSize * sizeof(T), GDRAM2NRAM);
-                    __memcpy(srca, src, segsize, NRAM2NRAM, destStrideL, srcStrideL, segnum); 
-                    __memcpy(srcb, src + 1, segsize, NRAM2NRAM, destStrideL, srcStrideL, segnum);
-                    
-                    __bang_half2float(tmpa, srca, maxNum);
-                    __bang_half2float(tmpb, srcb, maxNum);
-
-                    __bang_mul(cos0, tmpa, cos0, maxNum);
-                    __bang_mul(sin0, tmpb, sin0, maxNum);
-                    __bang_sub(cos0, cos0, sin0, maxNum);//结果临时存储在cos0上
-
-                    __bang_mul(sin1, tmpa, sin1, maxNum);
-                    __bang_mul(cos1, tmpb, cos1, maxNum);
-                    __bang_add(cos1, sin1, cos1, maxNum);
-
-                    __bang_float2half_dn(srca, cos0, maxNum);
-                    __bang_float2half_dn(srcb, cos1, maxNum);
-
-                    __memcpy(src, srca, segsize, NRAM2NRAM, destStrideW, srcStrideW, segnum);
-                    __memcpy(src + 1, srcb, segsize, NRAM2NRAM, destStrideW, srcStrideW, segnum);
-                    __memcpy(destination + indd + s * dSize, src, dSize * sizeof(T), NRAM2GDRAM);
-                    
-                    
-                }
-                if(remain){
-                    __memcpy(srcSin, sin_table + index + repeat * dSize, remain * sizeof(float), GDRAM2NRAM);    
-                    __memcpy(sin1, srcSin + 1, segsize_table, NRAM2NRAM, destStrideL_table, srcStrideL_table, segnum); 
-
-                    __memcpy(srcCos, cos_table + index + repeat * dSize, remain * sizeof(float), GDRAM2NRAM);     
-                    __memcpy(cos0, srcCos, segsize_table, NRAM2NRAM, destStrideL_table, srcStrideL_table, segnum); 
-                    __memcpy(cos1, srcCos + 1, segsize_table, NRAM2NRAM, destStrideL_table, srcStrideL_table, segnum);
-
-                    __memcpy(src, destination + indd + repeat * dSize, remain * sizeof(T), GDRAM2NRAM); 
-                    __memcpy(srca, src, segsize, NRAM2NRAM, destStrideL, srcStrideL, remain); 
-                    __memcpy(srcb, src + 1, segsize, NRAM2NRAM, destStrideL, srcStrideL, remain);    
-                    
-                    __bang_half2float(tmpa, srca, maxNum);
-                    __bang_half2float(tmpb, srcb, maxNum);
-
-                    __bang_mul(cos0, tmpa, cos0, maxNum);
-                    __bang_mul(sin0, tmpb, sin0, maxNum);
-                    __bang_sub(cos0, cos0, sin0, maxNum);//结果临时存储在cos0上
-
-                    __bang_mul(sin1, tmpa, sin1, maxNum);
-                    __bang_mul(cos1, tmpb, cos1, maxNum);
-                    __bang_add(cos1, sin1, cos1, maxNum);
-
-                    __bang_float2half_dn(srca, cos0, maxNum);
-                    __bang_float2half_dn(srcb, cos1, maxNum);
-
-                    __memcpy(src, srca, segsize, NRAM2NRAM, destStrideW, srcStrideW, remain);
-                    __memcpy(src + 1, srcb, segsize, NRAM2NRAM, destStrideW, srcStrideW, remain);
-                    __memcpy(destination + indd + repeat * dSize, src, remain * sizeof(T), NRAM2GDRAM);
-                    
-                    
-                }
-            }
-            
-        }
-        else{
-            
-            int segnum = dimsize;
-            int dh = dimsize / 2;
-
-            char *nram_buffer2 = nram_buffer1 + (2 * dimsize + 14 * dh) * sizeof(float);
-            float *srcSin = (float *)nram_buffer1;//[dimsize]
-            float *srcCos = srcSin + dimsize;//[dimsize]
-            float *sin0 = srcCos + dimsize;//[dh]
-            float *cos0 = sin0 + 3 * dh;//[dh]
-            float *sin1 = cos0 + 3 * dh;//[dh]
-            float *cos1 = sin1 + 3 * dh;//[dh]
-            float *tmpa = cos1 + 3 * dh;//[dh]
-            float *tmpb = tmpa + dh;//[dh]
-            
-            T *srca = (T *)nram_buffer2;//[dh]
-            T *srcb = srca + dh;//[dh]
-            T *src = srcb + 3 * dh;//[dimsize]
-            
-            for(int i = indStart; i < indStart + step; i++){
-                int indd = 0;
-                int indi = i;
-                indd += (indi % nh) * stride_1;
-                indi /= nh;
-                indd += (indi % nt) * stride_0;
-
-                int index = srcP[(indi % nt)] * dimsize;
-                
-                __memcpy(srcSin, sin_table + index, dimsize * sizeof(float), GDRAM2NRAM);     
-                __memcpy(sin0, srcSin, segsize_table, NRAM2NRAM, destStrideL_table, srcStrideL_table, segnum); 
-                __memcpy(sin1, srcSin + 1, segsize_table, NRAM2NRAM, destStrideL_table, srcStrideL_table, segnum);
-                
-                
-                
-                __memcpy(srcCos, cos_table + index, dimsize * sizeof(float), GDRAM2NRAM);     
-                __memcpy(cos0, srcCos, segsize_table, NRAM2NRAM, destStrideL_table, srcStrideL_table, segnum); 
-                __memcpy(cos1, srcCos + 1, segsize_table, NRAM2NRAM, destStrideL_table, srcStrideL_table, segnum);
-                
-                
-                
-                __memcpy(src, destination + indd, dimsize * sizeof(T), GDRAM2NRAM);
-                __memcpy(srca, src, segsize, NRAM2NRAM, destStrideL, srcStrideL, segnum); 
-                __memcpy(srcb, src + 1, segsize, NRAM2NRAM, destStrideL, srcStrideL, segnum); 
-                
-                
-                __bang_half2float(tmpa, srca, dh);
-                __bang_half2float(tmpb, srcb, dh);
-                
-                
-                
-                __bang_mul(cos0, tmpa, cos0, dh);
-                __bang_mul(sin0, tmpb, sin0, dh);
-                __bang_sub(cos0, cos0, sin0, dh);//结果临时存储在cos0上
-
-                __bang_mul(sin1, tmpa, sin1, dh);
-                __bang_mul(cos1, tmpb, cos1, dh);
-                __bang_add(cos1, sin1, cos1, dh);
-                
-                __bang_float2half_dn(srca, cos0, dh);
-                __bang_float2half_dn(srcb, cos1, dh);
-                
-                
-                __memcpy(src, srca, segsize, NRAM2NRAM, destStrideW, srcStrideW, segnum);
-                __memcpy(src + 1, srcb, segsize, NRAM2NRAM, destStrideW, srcStrideW, segnum);
-                __memcpy(destination + indd, src, dimsize * sizeof(T), NRAM2GDRAM);
-                
-                
-                
-            }  
-            
-        }
     }
     else{
+        nram_buffer1 = nram_buffer;
+    }
+    int dSize = 2 * maxNum;
+    int remain = dh % dSize;
+    int repeat = (dh - remain) / dSize;
+    int segnum = (repeat > 0 ? dSize : dh);
+    int count = (repeat > 0 ? maxNum : dh / 2);
+
+
+    char *nram_buffer2 = nram_buffer1 + 7 * count * sizeof(float);
+    float *sin = (float *)nram_buffer1;
+    float *cos = sin + count;
+    float *tmpa = cos + count;//[count]
+    float *tmpb = tmpa + count;//[count]
+    float *tmp_odd = tmpb + count;//[count]
+    float *tmp_even = tmp_odd + count;//[count]
+    float *tmp_tmp = tmp_even + count;//[count]
+    
+
+    T *srca = (T *)nram_buffer2;//[count]
+    T *srcb = srca + count;//[3 * count]
+    T *src = srcb + 3 * count;//[dSize]
+    
+    for(int i = indStart; i < indStart + step; i++){
+        int ind_i = i;
+        int ind_d = 0;
+        int ind_s = 0;
+        ind_d += (ind_i % nh) * y_strides_1;
+        ind_s += (ind_i % nh) * x_strides_1;
+        ind_i /= nh;
+        ind_d += (ind_i % nt) * y_strides_0;
+        ind_s += (ind_i % nt) * x_strides_0;
+        int index = (nt < maxNum ? srcP[(ind_i % nt)] * dh / 2 : pos_ids[(ind_i % nt)] * dh / 2);
+        for(int r = 0; r < repeat + (remain > 0 ? 1 : 0); r++){
+            int read_len = (r < repeat ? dSize : remain);
+            int dk = read_len / 2;
+            int start_d = ind_d + r * dSize;
+            int start_s = ind_s + r * dSize;
+            int sin_cos_index = index + r * maxNum; 
+            __memcpy(sin, sin_table + sin_cos_index, dk * sizeof(float), GDRAM2NRAM);
+            __memcpy(cos, cos_table + sin_cos_index, dk * sizeof(float), GDRAM2NRAM);              
         
-        if(dimsize >= maxNum){
-            int dSize = 2 * maxNum;
-            char *nram_buffer1 = nram_buffer + (2 * dSize + 14 * maxNum) * sizeof(float);
-            float *srcSin = (float *)nram_buffer;//[dSize]
-            float *srcCos = srcSin + dSize;//[dSize]
-            float *sin0 = srcCos + dSize;//[3 *maxNum]
-            float *cos0 = sin0 + 3 * maxNum;//[3 * maxNum]
-            float *sin1 = cos0 + 3 * maxNum;//[3 * maxNum],需要多申请内存，方便后面数据移动
-            float *cos1 = sin1 + 3 * maxNum;//[3 * maxNum],需要多申请内存，方便后面数据移动
-            float *tmpa = cos1 + 3 * maxNum;//[maxNum]
-            float *tmpb = tmpa + maxNum;//[maxNum]
+
+            __memcpy(src, source + start_s, read_len * sizeof(T), GDRAM2NRAM);
+            __memcpy(srca, src, segsize, NRAM2NRAM, destStrideL, srcStrideL, segnum); 
+            __memcpy(srcb, src + 1, segsize, NRAM2NRAM, destStrideL, srcStrideL, segnum);
             
+            if constexpr (std::is_same<T, half>::value){
+                __bang_half2float(tmpa, srca, dk);
+                __bang_half2float(tmpb, srcb, dk);
+            }
+            else{
+                __memcpy(tmpa, srca, dk * sizeof(T), NRAM2NRAM);
+                __memcpy(tmpb, srcb, dk * sizeof(T), NRAM2NRAM);
+            }
 
-            T *srca = (T *)nram_buffer1;//[maxNum]
-            T *srcb = srca + maxNum;//[3 * maxNum]
-            T *src = srcb + 3 * maxNum;//[dSize]
+            __bang_mul(tmp_odd, tmpa, cos, dk);
+            __bang_mul(tmp_tmp, tmpb, sin, dk);
+            __bang_sub(tmp_odd, tmp_odd, tmp_tmp, dk);
 
+            __bang_mul(tmp_even, tmpa, sin, dk);
+            __bang_mul(tmp_tmp, tmpb, cos, dk);
+            __bang_add(tmp_even, tmp_even, tmp_tmp, dk);
 
-            int segnum = 2 * maxNum;
-            
-            int remain = dimsize % dSize;
-            int repeat = (dimsize - remain) / dSize;
-            
-            for(int i = indStart; i < indStart + step; i++){
-                int indd = 0;
-                int indi = i;
-                indd += (indi % nh) * stride_1;
-                indi /= nh;
-                indd += (indi % nt) * stride_0;
-                int index = pos_ids[(indi % nt)] * dimsize;
-                for(int s = 0; s < repeat; s++){
-                    __memcpy(srcSin, sin_table + index + s * dSize, dSize * sizeof(float), GDRAM2NRAM);
-                    __memcpy(sin0, srcSin, segsize_table, NRAM2NRAM, destStrideL_table, srcStrideL_table, segnum); 
-                    __memcpy(sin1, srcSin + 1, segsize_table, NRAM2NRAM, destStrideL_table, srcStrideL_table, segnum);   
-
-                    __memcpy(srcCos, cos_table + index + s * dSize, dSize * sizeof(float), GDRAM2NRAM);              
-                    __memcpy(cos0, srcCos, segsize_table, NRAM2NRAM, destStrideL_table, srcStrideL_table, segnum); 
-                    __memcpy(cos1, srcCos + 1, segsize_table, NRAM2NRAM, destStrideL_table, srcStrideL_table, segnum);
-
-                    __memcpy(src, destination + indd + s * dSize, dSize * sizeof(T), GDRAM2NRAM);
-                    __memcpy(srca, src, segsize, NRAM2NRAM, destStrideL, srcStrideL, segnum); 
-                    __memcpy(srcb, src + 1, segsize, NRAM2NRAM, destStrideL, srcStrideL, segnum);
-                    
-                    __bang_half2float(tmpa, srca, maxNum);
-                    __bang_half2float(tmpb, srcb, maxNum);
-
-                    __bang_mul(cos0, tmpa, cos0, maxNum);
-                    __bang_mul(sin0, tmpb, sin0, maxNum);
-                    __bang_sub(cos0, cos0, sin0, maxNum);//结果临时存储在cos0上
-
-                    __bang_mul(sin1, tmpa, sin1, maxNum);
-                    __bang_mul(cos1, tmpb, cos1, maxNum);
-                    __bang_add(cos1, sin1, cos1, maxNum);
-
-                    __bang_float2half_dn(srca, cos0, maxNum);
-                    __bang_float2half_dn(srcb, cos1, maxNum);
-
-                    __memcpy(src, srca, segsize, NRAM2NRAM, destStrideW, srcStrideW, segnum);
-                    __memcpy(src + 1, srcb, segsize, NRAM2NRAM, destStrideW, srcStrideW, segnum);
-                    __memcpy(destination + indd + s * dSize, src, dSize * sizeof(T), NRAM2GDRAM);
-                    
-                    
-                }
-                if(remain){
-                    __memcpy(srcSin, sin_table + index + repeat * dSize, remain * sizeof(float), GDRAM2NRAM);    
-                    __memcpy(sin1, srcSin + 1, segsize_table, NRAM2NRAM, destStrideL_table, srcStrideL_table, segnum); 
-
-                    __memcpy(srcCos, cos_table + index + repeat * dSize, remain * sizeof(float), GDRAM2NRAM);     
-                    __memcpy(cos0, srcCos, segsize_table, NRAM2NRAM, destStrideL_table, srcStrideL_table, segnum); 
-                    __memcpy(cos1, srcCos + 1, segsize_table, NRAM2NRAM, destStrideL_table, srcStrideL_table, segnum);
-
-                    __memcpy(src, destination + indd + repeat * dSize, remain * sizeof(T), GDRAM2NRAM); 
-                    __memcpy(srca, src, segsize, NRAM2NRAM, destStrideL, srcStrideL, remain); 
-                    __memcpy(srcb, src + 1, segsize, NRAM2NRAM, destStrideL, srcStrideL, remain);    
-                    
-                    __bang_half2float(tmpa, srca, maxNum);
-                    __bang_half2float(tmpb, srcb, maxNum);
-
-                    __bang_mul(cos0, tmpa, cos0, maxNum);
-                    __bang_mul(sin0, tmpb, sin0, maxNum);
-                    __bang_sub(cos0, cos0, sin0, maxNum);//结果临时存储在cos0上
-
-                    __bang_mul(sin1, tmpa, sin1, maxNum);
-                    __bang_mul(cos1, tmpb, cos1, maxNum);
-                    __bang_add(cos1, sin1, cos1, maxNum);
-
-                    __bang_float2half_dn(srca, cos0, maxNum);
-                    __bang_float2half_dn(srcb, cos1, maxNum);
-
-                    __memcpy(src, srca, segsize, NRAM2NRAM, destStrideW, srcStrideW, remain);
-                    __memcpy(src + 1, srcb, segsize, NRAM2NRAM, destStrideW, srcStrideW, remain);
-                    __memcpy(destination + indd + repeat * dSize, src, remain * sizeof(T), NRAM2GDRAM);
-                    
-                    
-                }
+            if constexpr (std::is_same<T, half>::value){
+                __bang_float2half_dn(srca, tmp_odd, dk);
+                __bang_float2half_dn(srcb, tmp_even, dk);
+            }
+            else{
+                __memcpy(srca, tmp_odd, dk * sizeof(T), NRAM2NRAM);
+                __memcpy(srcb, tmp_even, dk * sizeof(T), NRAM2NRAM);
             }
             
-        }
-        else{
-            
-            int segnum = dimsize;
-            int dh = dimsize / 2;
-            
-            char *nram_buffer1 = nram_buffer + (2 * dimsize + 14 * dh) * sizeof(float);
-            float *srcSin = (float *)nram_buffer;//[dimsize]
-            float *srcCos = srcSin + dimsize;//[dimsize]
-            float *sin0 = srcCos + dimsize;//[dh]
-            float *cos0 = sin0 + 3 * dh;//[dh]
-            float *sin1 = cos0 + 3 * dh;//[dh]
-            float *cos1 = sin1 + 3 * dh;//[dh]
-            float *tmpa = cos1 + 3 * dh;//[dh]
-            float *tmpb = tmpa + dh;//[dh]
-            
-            T *srca = (T *)nram_buffer1;//[dh]
-            T *srcb = srca + dh;//[dh]
-            T *src = srcb + 3 * dh;//[dimsize]
-            
-            for(int i = indStart; i < indStart + step; i++){
-                int indd = 0;
-                int indi = i;
-                indd += (indi % nh) * stride_1;
-                indi /= nh;
-                indd += (indi % nt) * stride_0;
 
-                int index = pos_ids[(indi % nt)] * dimsize;
-                
-                __memcpy(srcSin, sin_table + index, dimsize * sizeof(float), GDRAM2NRAM);     
-                __memcpy(sin0, srcSin, segsize_table, NRAM2NRAM, destStrideL_table, srcStrideL_table, segnum); 
-                __memcpy(sin1, srcSin + 1, segsize_table, NRAM2NRAM, destStrideL_table, srcStrideL_table, segnum);
-                
-                
-                
-                __memcpy(srcCos, cos_table + index, dimsize * sizeof(float), GDRAM2NRAM);     
-                __memcpy(cos0, srcCos, segsize_table, NRAM2NRAM, destStrideL_table, srcStrideL_table, segnum); 
-                __memcpy(cos1, srcCos + 1, segsize_table, NRAM2NRAM, destStrideL_table, srcStrideL_table, segnum);
-                
-                
-                
-                __memcpy(src, destination + indd, dimsize * sizeof(T), GDRAM2NRAM);
-                __memcpy(srca, src, segsize, NRAM2NRAM, destStrideL, srcStrideL, segnum); 
-                __memcpy(srcb, src + 1, segsize, NRAM2NRAM, destStrideL, srcStrideL, segnum); 
-                
-                
-                __bang_half2float(tmpa, srca, dh);
-                __bang_half2float(tmpb, srcb, dh);
-                
-                
-                
-                __bang_mul(cos0, tmpa, cos0, dh);
-                __bang_mul(sin0, tmpb, sin0, dh);
-                __bang_sub(cos0, cos0, sin0, dh);//结果临时存储在cos0上
-
-                __bang_mul(sin1, tmpa, sin1, dh);
-                __bang_mul(cos1, tmpb, cos1, dh);
-                __bang_add(cos1, sin1, cos1, dh);
-                
-                __bang_float2half_dn(srca, cos0, dh);
-                __bang_float2half_dn(srcb, cos1, dh);
-                
-                
-                __memcpy(src, srca, segsize, NRAM2NRAM, destStrideW, srcStrideW, segnum);
-                __memcpy(src + 1, srcb, segsize, NRAM2NRAM, destStrideW, srcStrideW, segnum);
-                __memcpy(destination + indd, src, dimsize * sizeof(T), NRAM2GDRAM);
-                
-                
-                
-            }  
+            __memcpy(src, srca, segsize, NRAM2NRAM, destStrideW, srcStrideW, segnum);
+            __memcpy(src + 1, srcb, segsize, NRAM2NRAM, destStrideW, srcStrideW, segnum);
+            __memcpy(destination + start_d, src, read_len * sizeof(T), NRAM2GDRAM);
+            
             
         }
     }
     
 }
 template<typename T>
-void RoPEUnion(cnrtQueue_t queue, void *destination, void const *pos_ids, void const *sin_table, void const *cos_table, int stride_0, int stride_1, int nt, int nh, int dimsize) {
+void RoPEUnion(cnrtQueue_t queue, void *destination, const void *source, 
+                        const void *pos_ids, const void *sin_table, const void *cos_table, 
+                        int nt, int nh, int dh, int *x_strides, int *y_strides) {
     
-    auto pos_ = reinterpret_cast<uint32_t const *>(pos_ids);
-    auto sin_ = reinterpret_cast<float const *>(sin_table);
-    auto cos_ = reinterpret_cast<float const *>(cos_table);
-    auto t_ = reinterpret_cast<T *>(destination);
+    auto pos_ = reinterpret_cast<const uint32_t *>(pos_ids);
+    auto sin_ = reinterpret_cast<const float *>(sin_table);
+    auto cos_ = reinterpret_cast<const float *>(cos_table);
+    auto x = reinterpret_cast<const T *>(source);
+    auto y = reinterpret_cast<T *>(destination);
 
     cnrtDim3_t k_dim;
     cnrtFunctionType_t k_type;
@@ -394,15 +141,31 @@ void RoPEUnion(cnrtQueue_t queue, void *destination, void const *pos_ids, void c
     k_dim.z = 1;
     k_type = CNRT_FUNC_TYPE_UNION1;
 
-    RoPE<T><<<k_dim, k_type, queue>>>(t_, pos_, sin_, cos_, stride_0, stride_1, nt, nh, dimsize);
+    int ndim = 3;
+    char *workspace;
+    cnrtMalloc((void**)&workspace, 2 * ndim  * sizeof(int));
+    int *mlu_x_strides = (int *)workspace;
+    int *mlu_y_strides = mlu_x_strides + ndim;
+    cnrtMemcpy(mlu_x_strides, x_strides, ndim * sizeof(int), cnrtMemcpyHostToDev);
+    cnrtMemcpy(mlu_y_strides, y_strides, ndim * sizeof(int), cnrtMemcpyHostToDev);
+    RoPE<T><<<k_dim, k_type, queue>>>(y, x, 
+                        pos_, sin_, cos_, 
+                        nt, nh, dh, mlu_x_strides, mlu_y_strides);
     cnrtQueueSync(queue);
-    
+    cnrtFree(workspace);
 }
 
-extern "C" void RoPE_bang_f16(void *destination, void const *pos_ids, void const *sin_table, void const *cos_table, int stride_0, int stride_1, int nt, int nh, int dimsize){
+extern "C" void RoPE_bang(void *destination, const void *source, 
+                        const void *pos_ids, const void *sin_table, const void *cos_table, 
+                        int nt, int nh, int dh, int *x_strides, int *y_strides, int byteSize){
     cnrtQueue_t queue;
     CNRT_CHECK(cnrtSetDevice(0));
     CNRT_CHECK(cnrtQueueCreate(&queue));
-    RoPEUnion<half>(queue, destination, pos_ids, sin_table, cos_table, stride_0, stride_1, nt, nh, dimsize);
+    if (byteSize == 2){
+        RoPEUnion<half>(queue, destination, source, pos_ids, sin_table, cos_table, nt, nh, dh, x_strides, y_strides);
+    }
+    else{
+        RoPEUnion<float>(queue, destination, source, pos_ids, sin_table, cos_table, nt, nh, dh, x_strides, y_strides);
+    }
     CNRT_CHECK(cnrtQueueDestroy(queue));
 }

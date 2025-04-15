@@ -77,38 +77,26 @@ def test(test_shape, device):
     y_strides = (ctypes.c_int * ndim)(*(output.stride()))
     total_seq_len = sin_table.shape[0]
 
-    if test_dtype == torch.float16:
+    if device == "mlu":
+        torch_RoPE_time = performance.BangProfile((rotary_embedding, (t, sin_table, cos_table, torch_device)))
         
-        if device == "mlu":
-            torch_RoPE_time = performance.BangProfile((rotary_embedding, (t, sin_table, cos_table, torch_device)))
-            '''
-            lib.RoPE_cnnl_f16.argtypes = [
+        lib.RoPE_bang.argtypes = [
+            ctypes.POINTER(ctypes.c_void_p),
                 ctypes.POINTER(ctypes.c_void_p),
                 ctypes.POINTER(ctypes.c_void_p),
                 ctypes.POINTER(ctypes.c_void_p),
                 ctypes.POINTER(ctypes.c_void_p),
+                ctypes.c_int,
+                ctypes.c_int,
+                ctypes.c_int,
                 ctypes.POINTER(ctypes.c_int),
                 ctypes.POINTER(ctypes.c_int),
                 ctypes.c_int
-            ]
-            custom_RoPE_time = \
-            performance.BangProfile((lib.RoPE_cnnl_f16, (t_ptr, pos_ptr, sin_ptr, cos_ptr, shape, strides, total_seq_len)))
-            '''
-            lib.RoPE_bang_f16.argtypes = [
-                ctypes.POINTER(ctypes.c_void_p),
-                ctypes.POINTER(ctypes.c_void_p),
-                ctypes.POINTER(ctypes.c_void_p),
-                ctypes.POINTER(ctypes.c_void_p),
-                ctypes.c_int,
-                ctypes.c_int,
-                ctypes.c_int,
-                ctypes.c_int,
-                ctypes.c_int
-            ]
-            custom_RoPE_time = \
-            performance.BangProfile((lib.RoPE_bang_f16, (t_ptr, pos_ptr, sin_ptr, cos_ptr, stride_0, stride_1, nt, nh, dimsize)))
-    
-    if device == "kunlun":
+        ]
+        custom_RoPE_time = \
+        performance.BangProfile((lib.RoPE_bang, (output_ptr, t_ptr, pos_ptr, sin_ptr, cos_ptr, 
+            nt, nh, dimsize, x_strides, y_strides, byteSize)))
+    elif device == "kunlun":
         torch_RoPE_time = performance.KunlunProfile((rotary_embedding, (t, sin_table, cos_table, torch_device)))
         lib.rope_kunlun.argtypes = [
                 ctypes.POINTER(ctypes.c_void_p),

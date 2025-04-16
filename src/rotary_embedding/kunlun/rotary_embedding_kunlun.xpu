@@ -23,7 +23,7 @@ __global__ void ropeKunlunDevice(T *destination, const T *source,
     int step = (thread_id < remain ? step_hard : step_easy);
     int ind_start = (thread_id < remain ? thread_id * step_hard : remain * step_hard + (thread_id - remain) * step_easy);
 
-    constexpr int buf_size = 512;
+    constexpr int buf_size = 256;
     __local__ T x_local[buf_size];//昆仑芯不支持bf16到f32的转换，只能默认T=float
     __local__ T y_local[buf_size];
     __local__ float sin_local[buf_size];
@@ -97,7 +97,7 @@ void ropeKunlun(void *destination, const void *source,
                 (kunlun_size_t *)pos_ids, (float *)sin_table, (float *)cos_table, 
                 nt, nh, dh,
                 xpu_x_strides, xpu_y_strides, stream);           
-    xpu_wait();
+    xpu_wait(stream);
     xpu_free(workspace);   
     
 }

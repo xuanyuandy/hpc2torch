@@ -191,7 +191,7 @@ void launch_calculate(kunlun_size_t c_data_size,
                                                   xpu_a_shape, xpu_a_strides,
                                                   xpu_b_shape, xpu_b_strides,
                                                   std::forward<Args>(args)...);
-    xpu_wait();
+    xpu_wait(stream);
     xpu_free(workspace);
 }
 

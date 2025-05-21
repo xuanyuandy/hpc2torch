@@ -11,6 +11,7 @@ option(USE_CUDA "Enable CUDA compilation" OFF)
 option(USE_BANG "Enable BANG compilation" OFF)
 option(USE_KUNLUN "Enable KUNLUN compilation" OFF)
 option(USE_ASCEND "Enable ASCEND compilation" OFF)
+option(USE_TECO "Enable TECO compilation" OFF)
 option(USE_CPU "Enable CPU-only compilation" OFF)
 
 # 查找源文件
@@ -41,6 +42,9 @@ list(APPEND CUDA_SOURCE_FILES ${GPU_CUDA_FILES} ${GPU_CUDNN_FILES})
 file(GLOB BANG_MLU_FILES "src/**/mlu/*.mlu")
 file(GLOB BANG_CNNL_FILES "src/**/mlu/*.cpp")
 list(APPEND BANG_SOURCE_FILES ${BANG_MLU_FILES} ${BANG_CNNL_FILES})
+
+file(GLOB TECO_SCPP_FILES "src/**/teco/*.scpp")
+list(APPEND TECO_SOURCE_FILES ${TECO_SCPP_FILES})
 
 # 根据选项决定编译哪些源文件
 if(USE_CUDA)
@@ -214,6 +218,65 @@ elseif(USE_KUNLUN)
     # 设置 C++ 标准
     set_target_properties(my_library PROPERTIES CXX_STANDARD 17)
     set_target_properties(my_library PROPERTIES LINKER_LANGUAGE CXX)
+    
+elseif(USE_TECO)
+    # set(CMAKE_BUILD_TYPE Debug)
+    message(STATUS "TECO build enabled.")
+    add_compile_definitions(ENABLE_TECO_SDAA)
+
+    if ((NOT DEFINED TECO_HOME) AND (NOT DEFINED ENV{TECO_HOME}))
+        set(TECO_HOME "/opt/tecoai")
+        message(WARNING "TECO_HOME not defined, defaulting to /opt/tecoai")
+    elseif (DEFINED TECO_HOME)
+        set(TECO_HOME ${TECO_HOME} CACHE STRING "TECO SDK directory")
+    else()
+        set(TECO_HOME $ENV{TECO_HOME} CACHE STRING "TECO SDK directory")
+    endif()
+    message(STATUS "TECO_HOME: ${TECO_HOME}")
+
+    include_directories(${TECO_HOME}/include)
+    link_directories(${TECO_HOME}/lib64)
+
+    # 使用已有的 TECO_SOURCE_FILES 列表，编译 .scpp 文件
+    set(SCPP_OBJECTS "")
+    foreach(scpp_file ${TECO_SOURCE_FILES})
+        get_filename_component(fname ${scpp_file} NAME_WE)
+        set(obj_file ${CMAKE_CURRENT_BINARY_DIR}/${fname}.o)
+        add_custom_command(
+            OUTPUT ${obj_file}
+            COMMAND ${TECO_HOME}/bin/tecocc ${scpp_file} -o ${obj_file}
+                -O2 -fPIC -Wall -Werror -std=c++17 -pthread -c
+                -I${TECO_HOME}/include
+                -I${CMAKE_CURRENT_SOURCE_DIR}/include
+            DEPENDS ${scpp_file}
+            COMMENT "Compiling ${scpp_file} with tecocc"
+        )
+        list(APPEND SCPP_OBJECTS ${obj_file})
+    endforeach()
+
+    # 创建 teco_objects 构建目标
+    add_custom_target(teco_objects ALL DEPENDS ${SCPP_OBJECTS})
+
+    # 添加最终目标
+    list(APPEND ALL_SOURCE_FILES ${CPP_SOURCE_FILES})
+    add_library(my_library SHARED ${ALL_SOURCE_FILES} ${SCPP_OBJECTS})
+    add_dependencies(my_library teco_objects)
+    # target_compile_options(my_library PRIVATE -fsanitize=address -g3 -O0)
+    # target_link_options(my_library PRIVATE -fsanitize=address)
+    # 设置编译标准和选项
+    find_package(OpenMP REQUIRED)
+    target_compile_features(my_library PRIVATE cxx_std_17)
+    target_compile_options(my_library PRIVATE -Wall -Werror -fPIC)
+    target_include_directories(my_library PRIVATE ${TECO_HOME}/include ${CMAKE_CURRENT_SOURCE_DIR}/include)
+
+    # 链接 TECO SDK 库
+    target_link_libraries(my_library
+        OpenMP::OpenMP_CXX
+        stdc++
+        ${TECO_HOME}/lib64/libsdaart.so
+        ${TECO_HOME}/lib64/libtecoblas.so
+        ${TECO_HOME}/lib64/libtecodnn.so
+    )
 
 elseif(USE_CPU)
     message(STATUS "CPU-only build enabled.")

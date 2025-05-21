@@ -95,7 +95,7 @@ test_cases = [
 if args.device == 'mlu':
     import torch_mlu
 # 执行过滤后的测试用例
-for test_shape, w_shape,in test_cases:
+for test_shape, w_shape in test_cases:
     test(test_shape, w_shape, torch.float16, torch.float16, args.device)
     test(test_shape, w_shape, torch.float16, torch.float32, args.device)
     test(test_shape, w_shape, torch.float32, torch.float32, args.device)

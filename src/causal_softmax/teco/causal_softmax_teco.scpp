@@ -1,0 +1,199 @@
+#include "teco/common_teco.h"
+
+__local__ halfv16 h_local;
+__local__ floatv16 f_local;
+
+template<typename T>
+__global__ void causalSoftmaxDevice(T *destination, int *shape, int *stride, int ndim, int mask){
+    int othersize = 1;
+    for(int i = 0; i < ndim - 1; i++){
+        othersize *= shape[i];
+    }
+    
+    int remain = othersize % threadDim;
+    int step_easy = (othersize - remain) / threadDim;
+    int step_hard = step_easy + 1;
+    int step = (threadIdx < remain ? step_hard : step_easy);
+    int ind_start = (threadIdx < remain ? threadIdx * step_hard : (remain * step_hard + (threadIdx - remain) * step_easy));
+
+    int dimsize = shape[ndim - 1];
+    int buf_size = 16;
+    
+    for (int i = ind_start; i < ind_start + step; i++) {
+        int ind_d = 0;
+        int ind_i = i;
+        int lastI = ind_i % shape[ndim - 2];
+
+        int remain_dhead = (lastI + mask + 1) % buf_size;
+        int repeat = (lastI + mask + 1 - remain_dhead) / buf_size;//针对前面这部分做softmax
+
+        int length = dimsize - (lastI + mask + 1);
+        int remainI = length % buf_size;
+        int rI = (length - remainI) / buf_size;//把后面这部分赋值为0
+
+        for (int j = ndim - 2; j >= 0; --j) {
+            ind_d += (ind_i % shape[j]) * stride[j];
+            ind_i /= shape[j];
+        }
+        //下面开始计算max,sum
+        
+        float new_max = destination[ind_d];
+        float old_max = new_max;
+        float sum_value = 0.0f;
+        for(int r = 0; r < repeat; r++){
+            int start = ind_d + r * buf_size;
+            if constexpr (std::is_same<T, half>::value){
+                simd_load(h_local, destination + start);
+                f_local = simd_cvt_h2f(h_local);  
+            }
+            else if constexpr (std::is_same<T, float>::value){
+                simd_load(f_local, destination + start);    
+            }
+            for(int k = 0; k < buf_size; k++){
+                if(new_max < f_local[k]){
+                    new_max = f_local[k];
+                }
+            }
+            for(int k = 0; k < buf_size; k++){
+                f_local[k] = expf(f_local[k] - new_max);
+            }
+            if(r > 0){
+                sum_value = sum_value * expf(old_max - new_max);
+            }
+            sum_value += simd_redsum(f_local);
+            old_max = new_max;
+        }
+        if(remain_dhead){
+            int start = ind_d + repeat * buf_size;
+            for(int k = 0; k < remain_dhead; k++){
+                if constexpr (std::is_same<T, half>::value){
+                    if (new_max < static_cast<float>(destination[start + k])){
+                        new_max = static_cast<float>(destination[start + k]);
+                    }
+                }
+                else if constexpr (std::is_same<T, float>::value){
+                    if (new_max < destination[start + k]){
+                        new_max = destination[start + k];
+                    }
+                }
+            }
+            if (repeat > 0){
+                sum_value = sum_value * expf(old_max - new_max);
+            }
+            for(int k = 0; k < remain_dhead; k++){
+                if constexpr (std::is_same<T, half>::value){
+                    sum_value += expf(static_cast<float>(destination[start + k]) - new_max);
+                }
+                else if constexpr (std::is_same<T, float>::value){
+                    sum_value += expf(destination[start + k] - new_max);
+                }
+            }
+        }
+        
+        float sum_inv = 1.0f / sum_value;
+        //下面开始做softmax变换
+        for(int r = 0; r < repeat; r++){
+            int start = ind_d + r * buf_size;
+            if constexpr (std::is_same<T, half>::value){
+                simd_load(h_local, destination + start);
+                f_local = simd_cvt_h2f(h_local);  
+            }
+            else if constexpr (std::is_same<T, float>::value){
+                simd_load(f_local, destination + start);    
+            }
+            
+            for(int k = 0; k < buf_size; k++){
+                f_local[k] = expf(f_local[k] - new_max) * sum_inv;
+            }
+            if constexpr (std::is_same<T, half>::value){
+                h_local = simd_cvt_f2h(f_local);
+                simd_store(h_local, destination + start);  
+            }
+            else if constexpr (std::is_same<T, float>::value){
+                simd_store(f_local, destination + start);  
+            }
+        }
+        if(remain_dhead){
+            int start = ind_d + repeat * buf_size;
+            for(int k = 0; k < remain_dhead; k++){
+                if constexpr (std::is_same<T, half>::value){
+                    destination[start + k] = static_cast<half>(expf(static_cast<float>(destination[start + k]) - new_max) * sum_inv);
+                }
+                else if constexpr (std::is_same<T, float>::value){
+                    destination[start + k] = expf(destination[start + k] - new_max) * sum_inv;
+                }
+            }
+            
+        }
+        
+        //针对剩下部分赋值为0
+        for(int r = 0; r < rI; r++){
+            int start = ind_d + mask + 1 + lastI + r * buf_size;
+            
+            if constexpr (std::is_same<T, half>::value){
+                for(int k = 0; k < buf_size; k++){
+                    destination[start + k] = static_cast<half>(0.0f);
+                }
+            }
+            else if constexpr (std::is_same<T, float>::value){
+                for(int k = 0; k < buf_size; k++){
+                    destination[start + k] = 0.0f;
+                }
+            }    
+        }
+        
+        if (remainI){
+            int start = ind_d + mask + 1 + lastI + rI * buf_size;
+            if constexpr (std::is_same<T, half>::value){
+                for(int k = 0; k < remainI; k++){
+                    destination[start + k] = static_cast<half>(0.0f);
+                }
+            }
+            else if constexpr (std::is_same<T, float>::value){
+                for(int k = 0; k < remainI; k++){
+                    destination[start + k] = 0.0f;
+                }
+            }
+        }
+    }
+}
+
+template<typename T>
+void causalSoftmax(void *input, int *shape, int *stride, int ndim, int mask){
+    sdaaSetDevice(0);
+    sdaaStream_t stream;
+    sdaaStreamCreate(&stream);
+    
+    int *teco_shape;
+    int *teco_stride;
+    sdaaMalloc((void**)&teco_shape, ndim * sizeof(int));
+    sdaaMemcpy(teco_shape, shape, ndim * sizeof(int), sdaaMemcpyHostToDevice);
+    sdaaMalloc((void**)&teco_stride, ndim * sizeof(int));
+    sdaaMemcpy(teco_stride, stride, ndim * sizeof(int), sdaaMemcpyHostToDevice);
+    
+    if (sizeof(T) == 2){
+        auto destination = reinterpret_cast<half *>(input);
+        causalSoftmaxDevice<half><<<1, stream>>>(destination, teco_shape, teco_stride, ndim, mask);
+    }
+    else if(sizeof(T) == 4){
+        auto destination = reinterpret_cast<float *>(input);
+        causalSoftmaxDevice<float><<<1, stream>>>(destination, teco_shape, teco_stride, ndim, mask);
+    }
+    sdaaDeviceSynchronize();
+    
+    sdaaStreamDestroy(stream);
+    sdaaFree(teco_shape);
+    sdaaFree(teco_stride);
+}
+
+extern "C" void causal_softmax_teco(void *destination, int *shape, int *stride, int ndim, int mask, 
+                    int byteSize){
+    
+    if (byteSize == 2){
+        causalSoftmax<uint16_t>(destination, shape, stride, ndim, mask);
+    }
+    else if (byteSize == 4){
+        causalSoftmax<float>(destination, shape, stride, ndim, mask);
+    }
+}
+

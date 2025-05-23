@@ -79,7 +79,7 @@ def test(torch_device, voc, random_val, topp, topk, temperature):
     result_ptr = ctypes.cast(indices.data_ptr(), ctypes.POINTER(ctypes.c_void_p))
     
     if torch_device == "sdaa":
-        
+        torch_randomSample_time = performance.TecoProfile((random_sample_torch, (data, random_val, topp, topk, voc, temperature, torch_device)))
         lib.randomSample_teco.argtypes = [
             ctypes.POINTER(ctypes.c_void_p),
             ctypes.POINTER(ctypes.c_void_p),
@@ -90,17 +90,16 @@ def test(torch_device, voc, random_val, topp, topk, temperature):
             ctypes.c_float,
             ctypes.c_int
         ]
-        lib.randomSample_teco(result_ptr, 
+        custom_randomSample_time = \
+        performance.TecoProfile((lib.randomSample_teco, (result_ptr, 
                                 probs_ptr, 
                                 random_val,
                                 topp,
                                 voc,
                                 topk,
-                                temperature, byteSize)
+                                temperature, byteSize)))
         
-        
-        
-    #performance.logBenchmark(torch_randomSample_time, custom_randomSample_time)
+    performance.logBenchmark(torch_randomSample_time, custom_randomSample_time)
     
     if torch_device == "sdaa":
         torch.sdaa.synchronize()

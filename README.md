@@ -44,6 +44,11 @@ pool算子处理ndim=3的avgpool测试精度出错，对于三维向量必须手
 
 昇腾matmul算子对于高维矩阵乘法不支持alpha, beta参数，并且对于大规模矩阵存在精度问题，怀疑是规模太大造成的误差累积
 
+## 太初平台
+causal_softmax算子必须在计算结束以后加入打印信息才能保证测试通过，如果不做打印会报错segmentation fault (core dumped)
+
+random_sample算子多个测试也会报错segmentation fault (core dumped)，而且performance.TecoProfile调用也会导致问题，原因不详
+
 ## 算子定义
 batchnorm算子有一个momentum参数，onnx默认值是0.9，torch默认是0.1
 

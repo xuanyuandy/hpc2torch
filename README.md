@@ -49,6 +49,8 @@ causal_softmax算子必须在计算结束以后加入打印信息才能保证测
 
 random_sample算子多个测试也会报错segmentation fault (core dumped)，而且performance.TecoProfile调用也会导致问题，原因不详
 
+如果在python端计算以及数值对比的时候提前把tensor转移到CPU，这样可以避免上面的问题，原因不详
+
 ## 算子定义
 batchnorm算子有一个momentum参数，onnx默认值是0.9，torch默认是0.1
 

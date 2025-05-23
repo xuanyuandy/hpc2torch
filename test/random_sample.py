@@ -59,27 +59,27 @@ def test(torch_device, voc, random_val, topp, topk, temperature):
     print(
         f"Testing RandomSample on {torch_device} with voc:{voc} , topk:{topk}, topp:{topp}, dtype:{x_dtype}"
     )
-    print(1)
+    
     data = torch.arange(voc).float() * 0.0001
-    print(2)
+    
     _perm = torch.randperm(voc)
-    print(3)
+    
     data = data[_perm].to(x_dtype).to(torch_device)
-    print(4)
+    
     if(torch_device == 'mlu' or torch_device == 'npu'):
         
         indices = torch.zeros([1], dtype = torch.int64, device = torch_device)
     else:
-        print(5)
+        
         indices = torch.zeros([1], dtype = torch.uint64, device = torch_device)
-    print(voc)
+    
     ans = random_sample_torch(data, random_val, topp, topk, voc, temperature, torch_device)
-    print(topk)
+    
     probs_ptr = ctypes.cast(data.data_ptr(), ctypes.POINTER(ctypes.c_void_p))
     result_ptr = ctypes.cast(indices.data_ptr(), ctypes.POINTER(ctypes.c_void_p))
     
     if torch_device == "sdaa":
-        torch_randomSample_time = performance.TecoProfile((random_sample_torch, (data, random_val, topp, topk, voc, temperature, torch_device)))
+        torch_randomSample_time = performance.TecoProfile((random_sample_torch, (data.to("cpu"), random_val, topp, topk, voc, temperature, "cpu")))
         lib.randomSample_teco.argtypes = [
             ctypes.POINTER(ctypes.c_void_p),
             ctypes.POINTER(ctypes.c_void_p),
@@ -101,10 +101,9 @@ def test(torch_device, voc, random_val, topp, topk, temperature):
         
     performance.logBenchmark(torch_randomSample_time, custom_randomSample_time)
     
-    if torch_device == "sdaa":
-        torch.sdaa.synchronize()
-    #print(indices[0], ans , data[ans], data[indices[0]])
-    assert indices[0].to(ans.dtype) == ans or data[ans] == data[indices[0]]
+    ans = ans.to("cpu")
+    index = indices[0].to("cpu").to(ans.dtype)
+    assert index == ans or data[ans] == data[index]
 
 # 解析命令行参数
 parser = argparse.ArgumentParser(description="Test randomSample on different devices.")

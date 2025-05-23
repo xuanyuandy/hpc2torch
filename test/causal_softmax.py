@@ -70,7 +70,7 @@ def test(test_shape, device):
         performance.BangProfile((lib.causal_softmax_cnnl_f32, (output_ptr, shape, ndim)))
         '''
     elif device == "sdaa":
-        torch_causal_softmax_time = performance.TecoProfile((causal_softmax, (input, ))) #虽然迭代20次，但是不会修改input取值
+        torch_causal_softmax_time = performance.TecoProfile((causal_softmax, (input.to("cpu"), ))) #虽然迭代20次，但是不会修改input取值
         
         lib.causal_softmax_teco.argtypes = [
             ctypes.POINTER(ctypes.c_void_p),
@@ -85,7 +85,7 @@ def test(test_shape, device):
         #print(output.flatten()[:10])
     performance.logBenchmark(torch_causal_softmax_time, custom_causal_softmax_time)
     for i in range(40):#performance里面对output迭代了40次，因此这里需要同样迭代那么多次才能是正确结果
-        input = causal_softmax(input)
+        input = causal_softmax(input.to("cpu"))
     
     # 将结果转换回 PyTorch 张量以进行比较
     tmpa = input.to('cpu').detach().numpy().flatten()

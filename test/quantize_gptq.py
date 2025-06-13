@@ -301,6 +301,158 @@ def pack(weight, scale, zero, minq, maxq):
         qweight[:, i // 8] |= intweight[:, i] << (4 * (i % 8))
     return qweight
 
+def _get_perms():
+    perm = []
+    for i in range(32):
+        perm1 = []
+        col = i // 4
+        for block in [0, 1]:
+            for row in [
+                2 * (i % 4),
+                2 * (i % 4) + 1,
+                2 * (i % 4 + 4),
+                2 * (i % 4 + 4) + 1,
+            ]:
+                perm1.append(16 * row + col + 8 * block)
+        for j in range(4):
+            perm.extend([p + 256 * j for p in perm1])
+
+    perm = np.array(perm)
+    interleave = np.array([0, 2, 4, 6, 1, 3, 5, 7])
+    perm = perm.reshape((-1, 8))[:, interleave].ravel()
+    perm = torch.from_numpy(perm)
+    scale_perm = []
+    for i in range(8):
+        scale_perm.extend([i + 8 * j for j in range(8)])
+    scale_perm_single = []
+    for i in range(4):
+        scale_perm_single.extend([2 * i + j for j in [0, 1, 8, 9, 16, 17, 24, 25]])
+    return perm, scale_perm, scale_perm_single
+
+
+_perm, _scale_perm, _scale_perm_single = _get_perms()
+class MarlinLayer(nn.Module):
+    """PyTorch compatible Marlin layer; 4-bit (symmetric grouped) linear layer without bias."""
+
+    def __init__(self, infeatures, outfeatures, groupsize=-1):
+        """Create an empty Marlin layer.
+        @infeatures: number of input features (must be divisible by 128)
+        @outfeatures: number of output features (must be divisible by 256)
+        @groupsize: quantization groupsize (must be -1 or 128)
+        """
+        super().__init__()
+        if groupsize not in [-1, 128]:
+            raise ValueError("Only groupsize -1 and 128 are supported.")
+        if infeatures % 128 != 0 or outfeatures % 256 != 0:
+            raise ValueError(
+                "`infeatures` must be divisible by 128 and `outfeatures` by 256."
+            )
+        if groupsize == -1:
+            groupsize = infeatures
+        if infeatures % groupsize != 0:
+            raise ValueError("`infeatures` must be divisible by `groupsize`.")
+        self.k = infeatures
+        self.n = outfeatures
+        self.groupsize = groupsize
+        self.register_buffer(
+            "B", torch.empty((self.k // 16, self.n * 16 // 8), dtype=torch.int)
+        )
+        self.register_buffer(
+            "s", torch.empty((self.k // groupsize, self.n), dtype=torch.half)
+        )
+
+    def forward(self, A):
+        C = torch.empty(
+            A.shape[:-1] + (self.s.shape[1],), dtype=A.dtype, device=A.device
+        )
+        marlin_matmul(
+            A.view((-1, A.shape[-1])),
+            self.B,
+            C.view((-1, C.shape[-1])),
+            self.s,
+        )
+        return C
+
+    def pack(self, linear, scales):
+        """Pack a fake-quantized linear layer into this actual Marlin representation.
+        @linear: fake-quantized `torch.nn.Linear` layer to convert (must be of type `torch.half`)
+        @scales: corresponding quantization scales of shape `(infeatures, groups)`
+        """
+        if linear.weight.dtype != torch.half:
+            raise ValueError("Only `torch.half` weights are supported.")
+        tile = 16
+        maxq = 2**4 - 1
+        s = scales.t()
+        w = linear.weight.data.t()
+        if self.groupsize != self.k:
+            w = w.reshape((-1, self.groupsize, self.n))
+            w = w.permute(1, 0, 2)
+            w = w.reshape((self.groupsize, -1))
+            s = s.reshape((1, -1))
+        w = torch.round(w / s).int()
+        w += (maxq + 1) // 2
+        w = torch.clamp(w, 0, maxq)
+        if self.groupsize != self.k:
+            w = w.reshape((self.groupsize, -1, self.n))
+            w = w.permute(1, 0, 2)
+            w = w.reshape((self.k, self.n)).contiguous()
+            s = s.reshape((-1, len(_scale_perm)))[:, _scale_perm]
+        else:
+            s = s.reshape((-1, len(_scale_perm_single)))[:, _scale_perm_single]
+        s = s.reshape((-1, self.n)).contiguous()
+        w = w.reshape((self.k // tile, tile, self.n // tile, tile))
+        w = w.permute((0, 2, 1, 3))
+        w = w.reshape((self.k // tile, self.n * tile))
+        res = w
+        res = res.reshape((-1, _perm.numel()))[:, _perm].reshape(res.shape)
+        q = np.zeros((res.shape[0], res.shape[1] // 8), dtype=np.uint32)
+        res = res.cpu().numpy().astype(np.uint32)
+        for i in range(8):
+            q |= res[:, i::8] << 4 * i
+        q = torch.from_numpy(q.astype(np.int32)).to(w.device)
+        self.B[:, :] = q.to(self.B.device)
+        self.s[:, :] = s.to(self.s.device)
+def gen_quant4(m, n, groupsize=-1):
+    DEV = torch.device("cuda:0")
+    tile = 16
+    maxq = 2**4 - 1
+    w = torch.randn((m, n), dtype=torch.half, device=DEV)
+    if groupsize != -1:
+        w = w.reshape((-1, groupsize, n))
+        w = w.permute(1, 0, 2)
+        w = w.reshape((groupsize, -1))
+    s = torch.max(torch.abs(w), 0, keepdim=True)[0]
+    s *= 2 / maxq
+    w = torch.round(w / s).int()
+    w += (maxq + 1) // 2
+    w = torch.clamp(w, 0, maxq)
+    ref = (w - (maxq + 1) // 2).half() * s
+    if groupsize != -1:
+
+        def reshape(w):
+            w = w.reshape((groupsize, -1, n))
+            w = w.permute(1, 0, 2)
+            w = w.reshape((m, n)).contiguous()
+            return w
+
+        ref = reshape(ref)
+        w = reshape(w)
+    s = s.reshape((-1, n)).contiguous()
+    linear = nn.Linear(m, n)
+    linear.weight.data = ref.t()
+    # Workaround to test some special cases that are forbidden by the API
+    layer = MarlinLayer(256, 256, groupsize=groupsize)
+    if groupsize == -1:
+        groupsize = m
+    layer.k = m
+    layer.n = n
+    layer.groupsize = groupsize
+    layer.B = torch.empty((m // 16, n * 16 // 8), dtype=torch.int, device=DEV)
+    layer.s = torch.empty((m // groupsize, n), dtype=torch.half, device=DEV)
+    layer.pack(linear, s.t())
+    q = layer.B.reshape(m // 8, n)
+    s = layer.s
+    return ref, q, s
 
 # PyTorch implementation for matrix multiplication
 def quantize_gptq(a, b):  # 昇腾芯片的CPU不支持转置计算
@@ -410,7 +562,25 @@ def test(torch_device,
         caculate_time = \
         performance.CpuProfile((lib.caculate_cpu, 
         (output_ptr, inputA_ptr, packed_weights_ptr, scale_ptr, zero_ptr, M, K, N, group_size)))
-    custom_gptq_time = quant_time + caculate_time
+        custom_gptq_time = quant_time + caculate_time
+    if torch_device == "cuda":
+        torch_gptq_time = performance.CpuProfile((quantize_gptq, (a.t(), b.t())))  # 可以替换为mul, div
+        lib.caculate_cuda.argtypes = [
+            ctypes.POINTER(ctypes.c_void_p),
+            ctypes.POINTER(ctypes.c_void_p),
+            ctypes.POINTER(ctypes.c_void_p),
+            ctypes.POINTER(ctypes.c_void_p),
+            ctypes.POINTER(ctypes.c_void_p),
+            ctypes.c_int,
+            ctypes.c_int,
+            ctypes.c_int,
+            ctypes.c_int
+
+        ]
+        custom_gptq_time = \
+        performance.CudaProfile((lib.caculate_cuda, 
+        (output_ptr, inputA_ptr, packed_weights_ptr, scale_ptr, zero_ptr, M, K, N, group_size)))
+    
     performance.logBenchmark(torch_gptq_time, custom_gptq_time)
     atol = 1e-3
     rtol = 1e-3

@@ -497,11 +497,11 @@ def test(torch_device,
         minq = -(2 ** (bits - 1))
 
     if torch_device == "cuda":
-        B_ref, packed_weight, s = gen_quant4(K, N, groupsize=group_size)
+        B_ref, packed_weights, s = gen_quant4(K, N, groupsize=group_size)
         b = B_ref.t()
-        packed_weight = packed_weight.t()
+        packed_weights = packed_weights.t()
         s = s.t()
-        print(a.shape, b.shape, packed_weight.shape, s.shape)
+        print(a.shape, b.shape, packed_weights.shape, s.shape)
     if is_weight_transposed:
         ans = quantize_gptq(a.t(), b.t())
     else:

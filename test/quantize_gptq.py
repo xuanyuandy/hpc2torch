@@ -455,8 +455,11 @@ def gen_quant4(m, n, groupsize=-1):
     return ref, q, s
 
 # PyTorch implementation for matrix multiplication
-def quantize_gptq(a, b):  # 昇腾芯片的CPU不支持转置计算
-    ans = torch.matmul(a.to(torch.float32), b.to(torch.float32)).to(b.dtype)
+def quantize_gptq(a, b, is_weight_transposed):  # 昇腾芯片的CPU不支持转置计算
+    if is_weight_transposed:
+        ans = torch.matmul(a.to(torch.float32), b.to(torch.float32)).to(b.dtype)
+    else:
+        ans = torch.matmul(b.to(torch.float32), a.to(torch.float32)).to(b.dtype)
     return ans
 
 def test(torch_device,
@@ -497,15 +500,11 @@ def test(torch_device,
         minq = -(2 ** (bits - 1))
 
     if torch_device == "cuda":
-        B_ref, packed_weights, s = gen_quant4(K, N, groupsize=group_size)
-        b = B_ref.t()
-        packed_weights = packed_weights.t()
-        s = s.t()
+        b, packed_weights, s = gen_quant4(K, N, groupsize=group_size)
+        a = 1e0 * torch.randn([M, K], dtype=dtype).to(torch_device) #不知道为什么，不能使用a = a.t(), c = c.t()
+        c = torch.zeros([M, N], dtype=dtype).to(torch_device)
         print(a.shape, b.shape, packed_weights.shape, s.shape)
-    if is_weight_transposed:
-        ans = quantize_gptq(a.t(), b.t())
-    else:
-        ans = quantize_gptq(b, a)
+    ans = quantize_gptq(a, b, is_weight_transposed)
     if torch_device == "cpu":
         b_ref, s, z = get_scale_zero(
             b, a.t(), c, group_size, bits, sym, sign_ed=sign_ed
@@ -513,24 +512,15 @@ def test(torch_device,
 
         packed_weights = pack(b_ref, s, z, minq, maxq)
 
-    if is_weight_transposed:
-        output_ptr = ctypes.cast(c.t().data_ptr(), ctypes.POINTER(ctypes.c_void_p))
-        inputA_ptr = ctypes.cast(a.t().data_ptr(), ctypes.POINTER(ctypes.c_void_p))
-        inputB_ptr = ctypes.cast(b.t().data_ptr(), ctypes.POINTER(ctypes.c_void_p))
-        packed_weights_ptr = ctypes.cast(packed_weights.t().data_ptr(), ctypes.POINTER(ctypes.c_void_p))
-        scale_ptr = ctypes.cast(s.t().data_ptr(), ctypes.POINTER(ctypes.c_void_p))
-        zero_ptr = ctypes.cast(z.t().data_ptr(), ctypes.POINTER(ctypes.c_void_p))
-    else:
-        output_ptr = ctypes.cast(c.data_ptr(), ctypes.POINTER(ctypes.c_void_p))
-        inputA_ptr = ctypes.cast(a.data_ptr(), ctypes.POINTER(ctypes.c_void_p))
-        inputB_ptr = ctypes.cast(b.data_ptr(), ctypes.POINTER(ctypes.c_void_p))
-        packed_weights_ptr = ctypes.cast(packed_weights.data_ptr(), ctypes.POINTER(ctypes.c_void_p))
-        scale_ptr = ctypes.cast(s.data_ptr(), ctypes.POINTER(ctypes.c_void_p))
-        zero_ptr = ctypes.cast(z.data_ptr(), ctypes.POINTER(ctypes.c_void_p))
-    
-    
+    output_ptr = ctypes.cast(c.data_ptr(), ctypes.POINTER(ctypes.c_void_p))
+    inputA_ptr = ctypes.cast(a.data_ptr(), ctypes.POINTER(ctypes.c_void_p))
+    inputB_ptr = ctypes.cast(b.data_ptr(), ctypes.POINTER(ctypes.c_void_p))
+    packed_weights_ptr = ctypes.cast(packed_weights.data_ptr(), ctypes.POINTER(ctypes.c_void_p))
+    scale_ptr = ctypes.cast(s.data_ptr(), ctypes.POINTER(ctypes.c_void_p))
+    zero_ptr = ctypes.cast(z.data_ptr(), ctypes.POINTER(ctypes.c_void_p))
+        
     if torch_device == "cpu":
-        torch_gptq_time = performance.CpuProfile((quantize_gptq, (b, a)))  # 可以替换为mul, div
+        torch_gptq_time = performance.CpuProfile((quantize_gptq, (a, b, is_weight_transposed)))  # 可以替换为mul, div
         lib.quant_cpu.argtypes = [
             ctypes.POINTER(ctypes.c_void_p),
             ctypes.POINTER(ctypes.c_void_p),
@@ -564,7 +554,7 @@ def test(torch_device,
         (output_ptr, inputA_ptr, packed_weights_ptr, scale_ptr, zero_ptr, M, K, N, group_size)))
         custom_gptq_time = quant_time + caculate_time
     if torch_device == "cuda":
-        torch_gptq_time = performance.CpuProfile((quantize_gptq, (a.t(), b.t())))  # 可以替换为mul, div
+        torch_gptq_time = performance.CpuProfile((quantize_gptq, (a, b, is_weight_transposed)))  # 可以替换为mul, div
         lib.caculate_cuda.argtypes = [
             ctypes.POINTER(ctypes.c_void_p),
             ctypes.POINTER(ctypes.c_void_p),
@@ -584,22 +574,14 @@ def test(torch_device,
     performance.logBenchmark(torch_gptq_time, custom_gptq_time)
     atol = 1e-3
     rtol = 1e-3
-    if is_weight_transposed:
-        tmpa = quantize_gptq(a.t(), b.t()).to('cpu').numpy().flatten()
-        tmpc = c.t().to('cpu').numpy().flatten()
-        for i in range(tmpa.shape[0]):
-            if abs(tmpa[i] - tmpc[i]) > atol + rtol * abs(tmpa[i]):
-                print(tmpa[i], tmpc[i], abs(tmpa[i] - tmpc[i]), rtol * abs(tmpa[i]))
-                break
-        torch.allclose(c.t(), quantize_gptq(a.t(), b.t()), atol=atol, rtol=rtol)
-    else:
-        tmpa = quantize_gptq(b, a).to('cpu').numpy().flatten()
-        tmpc = c.to('cpu').numpy().flatten()
-        for i in range(tmpa.shape[0]):
-            if abs(tmpa[i] - tmpc[i]) > atol + rtol * abs(tmpa[i]):
-                print(tmpa[i], tmpc[i], abs(tmpa[i] - tmpc[i]), rtol * abs(tmpa[i]))
-                break
-        torch.allclose(c, quantize_gptq(b, a), atol=atol, rtol=rtol)
+    tmpa = quantize_gptq(a, b, is_weight_transposed).to('cpu').numpy().flatten()
+    tmpc = c.to('cpu').numpy().flatten()
+    for i in range(tmpa.shape[0]):
+        if abs(tmpa[i] - tmpc[i]) > atol + rtol * abs(tmpa[i]):
+            print(tmpa[i], tmpc[i], abs(tmpa[i] - tmpc[i]), rtol * abs(tmpa[i]))
+            break
+    torch.allclose(c, quantize_gptq(a, b, is_weight_transposed), atol=atol, rtol=rtol)
+        
     atol = max(abs(tmpa - tmpc))
 
     rtol = atol / max(abs(tmpc) + 1e-8)

@@ -69,9 +69,19 @@ list(APPEND ASCEND_SOURCE_FILES ${INCLUDE_SOURCE_FILES} ${ASCEND_INCLUDE_SOURCE_
 file(GLOB KUNLUN_SOURCE_FILES "src/**/kunlun/*.xpu")
 list(APPEND KUNLUN_SOURCE_FILES ${KUNLUN_INCLUDE_SOURCE_FILES})
 
-file(GLOB GPU_CUDA_FILES "src/**/gpu/*.cu")
-file(GLOB GPU_CUDNN_FILES "src/**/gpu/*.cpp")
-list(APPEND CUDA_SOURCE_FILES ${GPU_CUDA_FILES} ${GPU_CUDNN_FILES})
+if(USE_CUDA)
+  if(EXISTS "/usr/local/cuda")  # 英伟达 CUDA 平台
+    file(GLOB GPU_CUDA_FILES "src/**/gpu/*.cu")
+    file(GLOB GPU_CUDNN_FILES "src/**/gpu/*.cpp")
+    list(APPEND CUDA_SOURCE_FILES ${GPU_CUDA_FILES} ${GPU_CUDNN_FILES})
+  else()  # 登临 DLCC 平台
+    file(GLOB_RECURSE GPU_CUDNN_FILES "src/**/gpu/*.cpp")
+    file(GLOB_RECURSE GPU_CUDA_FILES "src/**/gpu/*.cu")
+    list(APPEND CUDA_SOURCE_FILES ${GPU_CUDA_FILES} ${GPU_CUDNN_FILES})
+    # 先不处理 .cu 文件，等下一段专门处理
+    set(SRC_CUDA_CU_FILES ${GPU_CUDA_FILES} CACHE INTERNAL "DLCC .cu files")
+  endif()
+endif()
 
 # 查找所有 .mlu, .cpp 文件 
 file(GLOB BANG_MLU_FILES "src/**/mlu/*.mlu")
@@ -83,20 +93,77 @@ list(APPEND TECO_SOURCE_FILES ${TECO_SCPP_FILES})
 
 # 根据选项决定编译哪些源文件
 if(USE_CUDA)
-    # 设置 CUDA 编译选项
-    set(CUDA_NVCC_FLAGS "${CUDA_NVCC_FLAGS} -O3")
-    message(STATUS "CUDA build enabled.")
-    enable_language(CXX)
+  if(EXISTS "/usr/local/cuda")
+    # ========== NVIDIA CUDA 平台 ==========
+    message(STATUS "Detected NVIDIA CUDA environment")
     enable_language(CUDA)
     list(APPEND ALL_SOURCE_FILES ${CUDA_SOURCE_FILES} ${CPP_SOURCE_FILES})
-    add_library(my_library SHARED ${ALL_SOURCE_FILES})# 创建库或可执行文件
+    add_library(my_library SHARED ${ALL_SOURCE_FILES})
+    
     find_package(CUDA REQUIRED)
-    include_directories(${CUDA_INCLUDE_DIRS})#寻找cuda以及cudnn等安装路径
+    include_directories(${CUDA_INCLUDE_DIRS})
     set_target_properties(my_library PROPERTIES
         CUDA_ARCHITECTURES 80
     )
-    target_link_libraries(my_library ${CUDA_LIBRARIES} cudnn cublas)#如果调用cudnn库需要链接cudnn, cublas
+    target_link_libraries(my_library ${CUDA_LIBRARIES} cudnn cublas)
 
+  else()
+    # ========== 登临平台 DLCC ==========
+    message(STATUS "Detected DLCC environment, configuring CUDA build")
+
+    add_compile_definitions(USE_CUDA=1)
+
+    set(DLCC_PATH /home/qy/Desktop/sdk/sdk/bin/dlcc)
+    set(DLCC_CUDA_PATH /home/qy/Desktop/sdk/sdk)
+    set(DLCC_ARCH dlgput64)
+
+    # 分离出 .cu 和 .cc/.cpp 文件
+    set(SRC_CUDA_CU_FILES ${GPU_CUDA_FILES} CACHE INTERNAL "DLCC .cu files")
+    set(SRC_CUDA_CPP_FILES ${GPU_CUDNN_FILES} CACHE INTERNAL "DLCC .cpp/.cc files")
+
+    # 把 cpp/cc 文件加入 ALL_SOURCE_FILES
+    list(APPEND ALL_SOURCE_FILES ${CUDA_SOURCE_FILES} ${CPP_SOURCE_FILES})
+    # 编译每个 .cu 文件为 .o
+    set(GENERATED_CU_OBJS "")
+    foreach(cu_file ${SRC_CUDA_CU_FILES})
+      get_filename_component(cu_name ${cu_file} NAME_WE)
+      get_filename_component(cu_dir ${cu_file} DIRECTORY)
+      string(REPLACE "${CMAKE_SOURCE_DIR}/" "" relative_dir ${cu_dir})
+      set(obj_path "${CMAKE_CURRENT_BINARY_DIR}/${relative_dir}/${cu_name}.cu.o")
+      get_filename_component(obj_dir ${obj_path} DIRECTORY)
+
+      add_custom_command(
+        OUTPUT ${obj_path}
+        COMMAND ${CMAKE_COMMAND} -E make_directory ${obj_dir}
+        COMMAND ${DLCC_PATH} -c ${cu_file} -o ${obj_path}
+                --cuda-path=${DLCC_CUDA_PATH}
+                --cuda-gpu-arch=${DLCC_ARCH}
+                -I${PROJECT_SOURCE_DIR}/include -O2 -std=c++17 -fPIC
+        DEPENDS ${cu_file}
+        COMMENT "Compiling ${cu_file} with dlcc"
+        VERBATIM
+      )
+      list(APPEND GENERATED_CU_OBJS ${obj_path})
+    endforeach()
+
+    add_custom_target(cuda_objs ALL DEPENDS ${GENERATED_CU_OBJS})
+
+    # 用 .cc/.cpp 文件 + .o 文件构建库
+    add_library(my_library SHARED ${ALL_SOURCE_FILES})
+    add_dependencies(my_library cuda_objs)
+    target_sources(my_library PRIVATE ${GENERATED_CU_OBJS})
+
+    # include / lib 路径设置
+    include_directories(${DLCC_CUDA_PATH}/include)
+    target_include_directories(my_library PRIVATE ${DLCC_CUDA_PATH}/include)
+    link_directories(${DLCC_CUDA_PATH}/lib)
+
+    target_link_libraries(my_library
+      ${DLCC_CUDA_PATH}/lib/libcurt.so
+      ${DLCC_CUDA_PATH}/lib/libcublas.so
+      ${DLCC_CUDA_PATH}/lib/libcudnn.so
+    )
+  endif()
 elseif(USE_BANG)
     message(STATUS "BANG build enabled.")
     

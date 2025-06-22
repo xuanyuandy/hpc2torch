@@ -1,5 +1,5 @@
 #include <cuda_runtime.h>
-#include <stdio.h> // 确保包含这个头文件
+#include <stdio.h>
 #include <math.h>
 #define cudaCheckError(ans)                   \
     {                                         \

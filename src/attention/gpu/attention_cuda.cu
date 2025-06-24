@@ -40,8 +40,7 @@ __device__ void matmulRQK(const float *__restrict inputQ,
     int smem_a_k = tid % 2;
     int smem_b_n = tid / 128;
     int smem_b_k = tid % 128;
-    // float tmp[64];
-    // memset(tmp, 0.0f, sizeof(tmp));
+
     int ph = 0;
     (float4 &)a[0] =
         (float4 &)inputQ[(indQ + smem_a_m) * d + ph * Bd + 4 * smem_a_k];

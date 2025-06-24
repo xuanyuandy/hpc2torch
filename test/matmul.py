@@ -6,6 +6,7 @@ import numpy as np
 import performance
 import sys
 import os
+from precision_compare import data_compare
 
 lib_path = os.path.join(os.path.dirname(os.path.abspath(__file__)), '.././build/lib/libmy_library.so')
 lib = ctypes.CDLL(lib_path)
@@ -37,17 +38,18 @@ def test_cuda(M, K, N, test_dtype):
         torch_matmul_time = performance.CudaProfile((torch.matmul, (A, B)))
         
         lib.matmul_cuda_f32.argtypes = [
-        ctypes.POINTER(ctypes.c_void_p),
-        ctypes.POINTER(ctypes.c_void_p),
-        ctypes.POINTER(ctypes.c_void_p),
-        ctypes.c_int,
-        ctypes.c_int,
-        ctypes.c_int
+            ctypes.POINTER(ctypes.c_void_p),
+            ctypes.POINTER(ctypes.c_void_p),
+            ctypes.POINTER(ctypes.c_void_p),
+            ctypes.c_int,
+            ctypes.c_int,
+            ctypes.c_int
         ]
         custom_matmul_time = performance.CudaProfile((
             lib.matmul_cuda_f32,
             (A_ptr, B_ptr, C_ptr, M, K, N)
         ))
+        # cudnn still be compiled
         '''
         lib.matmul_cudnn_f32.argtypes = [
         ctypes.POINTER(ctypes.c_void_p),
@@ -65,8 +67,9 @@ def test_cuda(M, K, N, test_dtype):
     performance.logBenchmark(torch_matmul_time, custom_matmul_time)
     tmpa = torch.matmul(A, B).to('cpu').numpy().flatten()
     tmpb = C.to('cpu').numpy().flatten()
-    atol = max(abs(tmpa - tmpb))
 
+    data_compare(tmpb, tmpa)
+    atol = max(abs(tmpa - tmpb))
     rtol = atol / max(abs(tmpb) + 1e-8)
 
     print("absolute error:%.4e"%(atol))
@@ -74,7 +77,7 @@ def test_cuda(M, K, N, test_dtype):
     
 parser = argparse.ArgumentParser(description="Test matmul on different devices.")
 parser.add_argument('--device', choices=['cpu', 'cuda'], required=True, help="Device to run the tests on.")
-args = parser.parse_args()   
+args = parser.parse_args()
 
 if args.device == "cuda":
     test_cases = [

@@ -6,6 +6,7 @@ import argparse
 import performance
 import sys
 import os
+from precision_compare import data_compare
 
 def funAttention(Q, K, V): 
     return torch.softmax(Q@K.t(), dim = 1)@V
@@ -21,7 +22,7 @@ def test(test_shape, test_dtype, device):
     Q = torch.randn(test_shape, device=device, dtype=torch.float32, requires_grad=False) 
     K = torch.randn(test_shape, device=device, dtype=torch.float32, requires_grad=False)
     V = torch.randn(test_shape, device=device, dtype=torch.float32, requires_grad=False)
-    # 创建输出张量
+
     attHPC = torch.zeros(test_shape, device = device, dtype = torch.float32)
     Q_ptr = ctypes.cast(Q.data_ptr(), ctypes.POINTER(ctypes.c_void_p))
     K_ptr = ctypes.cast(K.data_ptr(), ctypes.POINTER(ctypes.c_void_p))
@@ -30,12 +31,12 @@ def test(test_shape, test_dtype, device):
 
     if device == "cuda":
         lib.attention_nv_f32.argtypes = [
-        ctypes.POINTER(ctypes.c_void_p),
-        ctypes.POINTER(ctypes.c_void_p),
-        ctypes.POINTER(ctypes.c_void_p),
-        ctypes.c_int,
-        ctypes.c_int,
-        ctypes.POINTER(ctypes.c_void_p)
+            ctypes.POINTER(ctypes.c_void_p),
+            ctypes.POINTER(ctypes.c_void_p),
+            ctypes.POINTER(ctypes.c_void_p),
+            ctypes.c_int,
+            ctypes.c_int,
+            ctypes.POINTER(ctypes.c_void_p)
         ]
         torch_flash_time = performance.CudaProfile((funAttention, (Q, K, V)))
         custom_attention_time = performance.CudaProfile((
@@ -46,6 +47,8 @@ def test(test_shape, test_dtype, device):
 
     tmpa = funAttention(Q, K, V).to('cpu').numpy().flatten()
     tmpb = attHPC.to('cpu').numpy().flatten()
+
+    data_compare(tmpb, tmpa)
     atol = max(abs(tmpa - tmpb))
 
     rtol = atol / max(abs(tmpb) + 1e-8)

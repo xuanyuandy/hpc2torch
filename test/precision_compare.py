@@ -89,30 +89,15 @@ def display_error_output(real_data, expect_data, err_idx, relative_diff):
             break
     print("\033[31m-----------------------------------------------------------------------------\033[0m")
 
-# diff_thd：实际值减去预期值，误差在千分之一
-# pct_thd： 通过数/用例总数，fp16 精度是99.90%
-# 判断用例是否通过：首先去判断pct_thd是不是大于99.90%，如果大于，则Result pass，如果小于，则Result failed
-# 如果pct_thd不是100%，则从所有用例中取出误差最大的值打印出来，这个值就是控制台的Maximum error is: 1.0. Tolerance threshold is: 0.1，
-# 如果有值大于0.1，直接failed，如果小于0.1，则pass
-
-# Loop：对比单点索引号
-# Expect(R)：cpu期待输出值，即输入的右参数
-# Real(L)：npu实际输出值，即输入的左参数
-# L-R：单点绝对误差
-# |(L-R)/L|： 单点相对误差
-# DiffThd：相对误差容许阈值
-# PctThd：预测正确点个数达标阈值
-# PctRlt：相似度
-# Result：预测结果
-def data_compare(npu_output, cpu_output, diff_thd=0.005, pct_thd=0.005, max_diff_hd=0.1):
-    if npu_output.dtype == "|V2":
+def data_compare(gpu_output, cpu_output, diff_thd=0.005, pct_thd=0.005, max_diff_hd=0.1):
+    if gpu_output.dtype == "|V2":
         import bfloat16ext
-        npu_output.dtype = "bfloat16"
+        gpu_output.dtype = "bfloat16"
     max_error_idx = 10000000
-    real_data = npu_output.flatten()
+    real_data = gpu_output.flatten()
     data_compe = cpu_output.flatten()
     if real_data.size == 0 and real_data.size == data_compe.size:
-        print_log('The npu_output is [],and it is same as bm_output, the result of data_compare is \"Pass\"')
+        print_log('The gpu_output is [],and it is same as bm_output, the result of data_compare is \"Pass\"')
         return "Pass", 100.0, 0
     start = 0
     end = real_data.size - 1
@@ -121,7 +106,7 @@ def data_compare(npu_output, cpu_output, diff_thd=0.005, pct_thd=0.005, max_diff
     max_error = 0
     result = "Failed"
     if real_data.size != data_compe.size:
-        print_log('Error,the size of npu output[%s] and benchmark[%s] is not equal.' % (real_data.size, data_compe.size))
+        print_log('Error,the size of gpu output[%s] and benchmark[%s] is not equal.' % (real_data.size, data_compe.size))
         return result, 0.0, max_error
 
     overflows_count = data_compe[np.isinf(data_compe)].size + data_compe[np.isnan(data_compe)].size

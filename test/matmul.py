@@ -8,6 +8,8 @@ import sys
 import os
 from precision_compare import data_compare
 
+# os.environ['CUDA_LAUNCH_BLOCKING'] = "1"
+
 lib_path = os.path.join(os.path.dirname(os.path.abspath(__file__)), '.././build/lib/libmy_library.so')
 lib = ctypes.CDLL(lib_path)
 

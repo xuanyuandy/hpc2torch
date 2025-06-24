@@ -1,3 +1,4 @@
+#include <stdio.h>
 #include <cuda.h>
 
 const int TM = 8;

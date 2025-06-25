@@ -27,7 +27,7 @@ def matmul(_c, beta, _a, _b, alpha):
 def test_cuda(M, K, N, test_dtype):
     device = "cuda"
     print(
-        f"Testing Attention on {device} with M-K-N:{M, K, N} , dtype:{test_dtype}"
+        f"Testing Matmul on {device} with M-K-N:{M, K, N} , dtype:{test_dtype}"
     )
     A = torch.randn([M, K], device=device, dtype=torch.float32, requires_grad=False) 
     B = torch.randn([K, N], device=device, dtype=torch.float32, requires_grad=False)

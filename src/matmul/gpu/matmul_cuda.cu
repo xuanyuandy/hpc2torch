@@ -20,31 +20,44 @@ const int warpX = (warpNum == 1 ? 1 : 2);
 const int warpY = warpNum / warpX;
 
 
+// each blockx calc BM = 16(thread_num) * 8(single_thread_calc_element_num)
+// each threadx calc 8(TM) element
 template <int BM, int BN, int BK, int TM, int TN>
 __global__ void matrixKernel1st(float *dA, float *dB, float *dC, int M, int K, int N)
 {
     __shared__ float SA[BM * BK];
     __shared__ float SB[BK * BN];
+    
+    // calc base block offset in x/y direction in global memory
     int indA = TM * (blockIdx.x * blockDim.x);
     int indB = TN * (blockIdx.y * blockDim.y);
     int width = (K + BK - 1) / BK;
-    float tmp[TM * TN] = {0.0f};
+    float tmp[TM * TN] = {0.0f};    // tmp pos is register
+
+    // TODO x/y axis direction swap?
     int tid = threadIdx.x + threadIdx.y * blockDim.x;
+    // int tid = threadIdx.y + threadIdx.x * blockDim.y;
+
+    // 2 = 8 / 4(4 pair element view memory)
+    // 32 = 128 / 4(4 pair element view memory)
     int smem_a_m = tid / 2;
     int smem_a_k = tid % 2;
     int smem_b_k = tid / 32;
     int smem_b_n = tid % 32;
 
-    // load A matrix from share memory
+    // load A/B matrix from share memory
     // A matrix index is [8 * threadIdx.x, BK] in matrix with [128, BK]
     // B matrix index is [BK, 8 * threadIdx.y] in matrix with [8, 128]
     // so the neighbour threadIdx.x offset is 128 which meet bank conflict (access SA)
-
+    // Bank conflict details:
     // share memory is divide into 32 bank, each bank length is 4B
     // The best scene is different threads of the same wrap access different banks
 
+    // split k axis, and loop split_k times
     for (int ph = 0; ph < width; ph++)
     {
+        // TODO judge view global memory out of bound
+        // copy matrix from global memory to share memory in 4 element pair by using float4
         (float4 &)SA[smem_a_m * BK + 4 * smem_a_k] = (float4 &)dA[(indA + smem_a_m) * K + 4 * smem_a_k + ph * BK];
         (float4 &)SB[smem_b_k * BN + 4 * smem_b_n] = (float4 &)dB[(smem_b_k + ph * BK) * N + indB + 4 * smem_b_n];
         for (int id = 0; id < 4; id++)
@@ -59,8 +72,9 @@ __global__ void matrixKernel1st(float *dA, float *dB, float *dC, int M, int K, i
                 SB[smem_b_k * BN + 4 * smem_b_n + id] = 0.0f;
             }
         }
-
         __syncthreads();
+        
+        // finish [TM, BK] * [BK, TN] matrix calculation
         for (int index_q = 0; index_q < TM; index_q++)
         {
             for (int index_v = 0; index_v < TN; index_v++)
@@ -75,6 +89,8 @@ __global__ void matrixKernel1st(float *dA, float *dB, float *dC, int M, int K, i
         }
         __syncthreads();
     }
+
+    // each thread calc TM * TN matrix, copy out small matrix from share memory to global memory 
     for (int index_q = 0; index_q < TM; index_q++)
     {
         for (int index_v = 0; index_v < TN; index_v++)
